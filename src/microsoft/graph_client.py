@@ -112,17 +112,30 @@ class GraphClient:
 
     # ==================== CALENDAR ====================
 
-    async def get_calendar_events(self, days: int = 7) -> list[dict]:
-        """Get upcoming calendar events."""
+    async def get_calendar_events(
+        self,
+        days: int = 7,
+        past_days: int = 0,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Get calendar events within a date range.
+
+        Args:
+            days: Number of days to look ahead (default 7)
+            past_days: Number of days to look back (default 0)
+            limit: Maximum number of events to return
+        """
         now = datetime.now(timezone.utc)
-        end = now + timedelta(days=days)
+        start_dt = now - timedelta(days=past_days)
+        end_dt = now + timedelta(days=days)
 
         params = {
-            "startDateTime": now.isoformat(),
-            "endDateTime": end.isoformat(),
+            "startDateTime": start_dt.isoformat(),
+            "endDateTime": end_dt.isoformat(),
             "$orderby": "start/dateTime",
             "$select": "id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl,bodyPreview",
-            "$top": 50,
+            "$top": limit,
         }
 
         result = await self._request("GET", "/me/calendarView", params=params)
@@ -130,15 +143,77 @@ class GraphClient:
         events = []
         for event in result.get("value", []):
             start = event.get("start", {})
-            end = event.get("end", {})
+            end_time = event.get("end", {})
 
             events.append({
                 "id": event["id"],
                 "subject": event.get("subject", "(No title)"),
                 "start": start.get("dateTime", ""),
                 "start_timezone": start.get("timeZone", "UTC"),
-                "end": end.get("dateTime", ""),
-                "end_timezone": end.get("timeZone", "UTC"),
+                "end": end_time.get("dateTime", ""),
+                "end_timezone": end_time.get("timeZone", "UTC"),
+                "location": event.get("location", {}).get("displayName", ""),
+                "organizer": event.get("organizer", {}).get("emailAddress", {}).get("name", ""),
+                "organizer_email": event.get("organizer", {}).get("emailAddress", {}).get("address", ""),
+                "attendees": [
+                    {
+                        "name": a.get("emailAddress", {}).get("name", ""),
+                        "email": a.get("emailAddress", {}).get("address", ""),
+                        "status": a.get("status", {}).get("response", ""),
+                    }
+                    for a in event.get("attendees", [])
+                ],
+                "is_online": event.get("isOnlineMeeting", False),
+                "online_url": event.get("onlineMeetingUrl", ""),
+                "description": event.get("bodyPreview", "")[:200],
+            })
+
+        return events
+
+    async def get_past_events(self, days: int = 7, limit: int = 50) -> list[dict]:
+        """Get past calendar events from the last N days."""
+        return await self.get_calendar_events(days=0, past_days=days, limit=limit)
+
+    async def get_events_for_date(self, date_str: str, limit: int = 50) -> list[dict]:
+        """
+        Get calendar events for a specific date.
+
+        Args:
+            date_str: Date in YYYY-MM-DD format (e.g., "2025-01-30")
+            limit: Maximum number of events
+        """
+        from datetime import datetime as dt
+
+        try:
+            target_date = dt.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM-DD format.")
+
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        params = {
+            "startDateTime": start_of_day.isoformat(),
+            "endDateTime": end_of_day.isoformat(),
+            "$orderby": "start/dateTime",
+            "$select": "id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl,bodyPreview",
+            "$top": limit,
+        }
+
+        result = await self._request("GET", "/me/calendarView", params=params)
+
+        events = []
+        for event in result.get("value", []):
+            start = event.get("start", {})
+            end_time = event.get("end", {})
+
+            events.append({
+                "id": event["id"],
+                "subject": event.get("subject", "(No title)"),
+                "start": start.get("dateTime", ""),
+                "start_timezone": start.get("timeZone", "UTC"),
+                "end": end_time.get("dateTime", ""),
+                "end_timezone": end_time.get("timeZone", "UTC"),
                 "location": event.get("location", {}).get("displayName", ""),
                 "organizer": event.get("organizer", {}).get("emailAddress", {}).get("name", ""),
                 "organizer_email": event.get("organizer", {}).get("emailAddress", {}).get("address", ""),

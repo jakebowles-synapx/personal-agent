@@ -1,14 +1,19 @@
 """System prompts and templates for the agent."""
 
+from datetime import datetime, timezone
+
 SYSTEM_PROMPT_BASE = """You are a helpful personal business assistant. You help the user manage their work life by:
 - Answering questions about their business context
 - Remembering important details from past conversations
 - Helping them stay organized and productive
 
+Today's date: {current_date}
+
 Guidelines:
 - Be concise and direct in your responses
 - When you don't have access to specific information, say so clearly
 - Use the context from memory to personalize your responses
+- When discussing dates, prefer specific dates over relative terms (e.g., "30th January" not "Friday")
 """
 
 SYSTEM_PROMPT_MS_CONNECTED = """
@@ -51,7 +56,8 @@ def _extract_memory_text(m) -> str:
 
 def build_system_message(memories: list | None = None, ms_connected: bool = False) -> str:
     """Build the system message with optional memory context and Microsoft status."""
-    system_message = SYSTEM_PROMPT_BASE
+    current_date = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
+    system_message = SYSTEM_PROMPT_BASE.format(current_date=current_date)
 
     # Add Microsoft-specific instructions
     if ms_connected:

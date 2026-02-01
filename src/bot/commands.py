@@ -140,11 +140,15 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     try:
-        orchestrator.clear_user_memories(user_id)
-        await update.message.reply_text("All your memories have been cleared.")
+        orchestrator.clear_all(user_id)
+        await update.message.reply_text(
+            "All your data has been cleared:\n"
+            "- Long-term memories\n"
+            "- Conversation history"
+        )
     except Exception as e:
-        logger.error(f"Failed to clear memories: {e}")
-        await update.message.reply_text("Failed to clear memories. Please try again.")
+        logger.error(f"Failed to clear data: {e}")
+        await update.message.reply_text("Failed to clear data. Please try again.")
 
 
 async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

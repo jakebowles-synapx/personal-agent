@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -22,6 +22,8 @@ SCOPES = [
     "Chat.Read",
     "Files.Read.All",
     "OnlineMeetings.Read",
+    "OnlineMeetingTranscript.Read.All",  # For meeting transcripts
+    "OnlineMeetingAiInsight.Read.All",  # For Copilot AI insights (requires Copilot license)
 ]
 
 
@@ -60,7 +62,7 @@ class TokenStore:
     def save_tokens(self, user_id: str, token_data: dict) -> None:
         """Save encrypted tokens for a user."""
         encrypted = self.fernet.encrypt(json.dumps(token_data).encode()).decode()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -166,7 +168,7 @@ class MicrosoftAuth:
         token_data = {
             "access_token": result["access_token"],
             "refresh_token": result.get("refresh_token"),
-            "expires_at": (datetime.utcnow() + timedelta(seconds=result["expires_in"])).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=result["expires_in"])).isoformat(),
             "scope": result.get("scope", ""),
         }
         self.token_store.save_tokens(user_id, token_data)
@@ -182,8 +184,8 @@ class MicrosoftAuth:
             return None
 
         # Check if token is expired (with 5 min buffer)
-        expires_at = datetime.fromisoformat(token_data["expires_at"])
-        if datetime.utcnow() + timedelta(minutes=5) >= expires_at:
+        expires_at = datetime.fromisoformat(token_data["expires_at"]).replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) + timedelta(minutes=5) >= expires_at:
             # Token expired or expiring soon, refresh it
             logger.info(f"Refreshing token for user {user_id}")
             token_data = await self._refresh_token(user_id, token_data)
@@ -215,7 +217,7 @@ class MicrosoftAuth:
         new_token_data = {
             "access_token": result["access_token"],
             "refresh_token": result.get("refresh_token", refresh_token),
-            "expires_at": (datetime.utcnow() + timedelta(seconds=result["expires_in"])).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=result["expires_in"])).isoformat(),
             "scope": result.get("scope", ""),
         }
         self.token_store.save_tokens(user_id, new_token_data)

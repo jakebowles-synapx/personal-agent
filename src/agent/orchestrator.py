@@ -4,7 +4,7 @@ import json
 import logging
 
 from src.llm import AzureOpenAIClient
-from src.memory import MemoryClient
+from src.memory import MemoryClient, ConversationHistory
 from src.microsoft.auth import MicrosoftAuth
 
 from .prompts import build_system_message
@@ -22,12 +22,13 @@ class AgentOrchestrator:
     def __init__(self) -> None:
         self.llm = AzureOpenAIClient()
         self.memory = MemoryClient()
+        self.history = ConversationHistory()
         self.auth = MicrosoftAuth()
         self.tool_executor = ToolExecutor(self.auth)
 
     async def process_message(self, user_id: str, message: str) -> str:
         """Process a user message and return the agent's response."""
-        # Search for relevant memories
+        # Search for relevant memories (long-term facts)
         memories = []
         try:
             memories = self.memory.search(query=message, user_id=user_id, limit=5)
@@ -35,16 +36,27 @@ class AgentOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to search memories: {e}")
 
+        # Get recent conversation history (short-term context)
+        recent_messages = []
+        try:
+            recent_messages = self.history.get_recent_messages(user_id=user_id, limit=20)
+            logger.info(f"Retrieved {len(recent_messages)} recent messages from history")
+        except Exception as e:
+            logger.warning(f"Failed to get conversation history: {e}")
+
         # Check if user has Microsoft connected
         ms_connected = self.auth.is_connected(user_id)
 
         # Build messages for the LLM
         system_message = build_system_message(memories, ms_connected=ms_connected)
         logger.debug(f"System message: {system_message}")
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": message},
-        ]
+
+        # Construct messages: system, then history, then current message
+        messages = [{"role": "system", "content": system_message}]
+        messages.extend(recent_messages)
+        messages.append({"role": "user", "content": message})
+
+        logger.info(f"Sending {len(messages)} messages to LLM (1 system + {len(recent_messages)} history + 1 current)")
 
         # Get response from LLM (with tools if Microsoft is connected)
         if ms_connected:
@@ -52,7 +64,13 @@ class AgentOrchestrator:
         else:
             response = await self.llm.chat(messages=messages)
 
-        # Store the conversation in memory
+        # Store the exchange in conversation history (short-term)
+        try:
+            self.history.add_exchange(user_id=user_id, user_message=message, assistant_message=response)
+        except Exception as e:
+            logger.warning(f"Failed to store conversation history: {e}")
+
+        # Store the conversation in Mem0 memory (long-term facts extraction)
         try:
             conversation = [
                 {"role": "user", "content": message},
@@ -119,6 +137,19 @@ class AgentOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to clear memories: {e}")
             raise
+
+    def clear_conversation_history(self, user_id: str) -> None:
+        """Clear conversation history for a user."""
+        try:
+            self.history.clear_history(user_id=user_id)
+        except Exception as e:
+            logger.warning(f"Failed to clear conversation history: {e}")
+            raise
+
+    def clear_all(self, user_id: str) -> None:
+        """Clear both memories and conversation history for a user."""
+        self.clear_user_memories(user_id)
+        self.clear_conversation_history(user_id)
 
     def is_microsoft_connected(self, user_id: str) -> bool:
         """Check if user has Microsoft 365 connected."""

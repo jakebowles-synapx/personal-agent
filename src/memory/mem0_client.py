@@ -1,6 +1,7 @@
 """Mem0 client for conversation memory."""
 
 import logging
+from datetime import datetime, timezone
 
 from mem0 import Memory
 
@@ -8,12 +9,41 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Custom prompt for Mem0 fact extraction - ensures absolute dates and specificity
+MEMORY_EXTRACTION_PROMPT = """You are a memory extraction assistant. Extract important facts from conversations.
+
+CRITICAL RULES:
+1. ALWAYS convert relative dates/times to ABSOLUTE dates:
+   - "tomorrow" → the specific date (e.g., "2nd February 2025")
+   - "Friday" → the specific date (e.g., "31st January 2025")
+   - "next week" → the specific date range
+   - "in 2 hours" → include the actual time if relevant, or omit if not important
+
+2. Include SPECIFIC details:
+   - Names, dates, locations, amounts, deadlines
+   - "Meeting with John" → "Meeting with John Smith from Acme Corp"
+
+3. SKIP extracting:
+   - Vague or temporary information
+   - Information only relevant in the moment
+   - Chit-chat or pleasantries
+
+4. For time-sensitive facts, include when it was mentioned:
+   - "Has a meeting on 30th January 2025 (mentioned on 29th January)"
+
+Today's date for reference: {current_date}
+
+Extract facts that will still be useful and accurate days or weeks from now."""
+
 
 class MemoryClient:
     """Client for storing and retrieving conversation memories using Mem0."""
 
     def __init__(self) -> None:
+        current_date = datetime.now(timezone.utc).strftime("%d %B %Y")
+
         config = {
+            "custom_prompt": MEMORY_EXTRACTION_PROMPT.format(current_date=current_date),
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
