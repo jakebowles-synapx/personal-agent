@@ -2,6 +2,10 @@ import { useState, useCallback } from 'react'
 import { Routes, Route, useNavigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
+import Dashboard from './pages/Dashboard'
+import Recommendations from './pages/Recommendations'
+import Knowledge from './pages/Knowledge'
+import Agents from './pages/Agents'
 import Memories from './pages/Memories'
 import Settings from './pages/Settings'
 import { useApi } from './hooks/useApi'
@@ -90,6 +94,10 @@ function App() {
               />
             }
           />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/recommendations" element={<Recommendations />} />
+          <Route path="/knowledge" element={<Knowledge />} />
+          <Route path="/agents" element={<Agents />} />
           <Route path="/memories" element={<Memories />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

@@ -18,7 +18,12 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies (curl for health checks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -30,6 +35,9 @@ COPY --from=frontend-builder /app/web/dist ./web/dist
 
 # Create data directory for SQLite databases
 RUN mkdir -p /app/data
+
+# Expose port
+EXPOSE 8000
 
 # Run the application
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

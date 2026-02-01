@@ -474,6 +474,38 @@ HARVEST_TOOLS = [
     },
 ]
 
+# Knowledge tools (always available)
+KNOWLEDGE_TOOLS = [
+    {
+        "type": "function",
+        "name": "propose_knowledge",
+        "description": "Propose adding information to the knowledge base. Use this when you learn important facts about the user's organization, team, projects, clients, or processes that should be remembered permanently. The user will review and approve before it's saved. Categories: 'strategy' (goals, OKRs), 'team' (people, roles), 'processes' (workflows), 'clients' (client info), 'projects' (project context).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["strategy", "team", "processes", "clients", "projects"],
+                    "description": "Category for the knowledge item",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Short title for the knowledge (e.g., 'CTO Name', 'Project Alpha Budget')",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The knowledge content to store",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why this should be saved to knowledge",
+                },
+            },
+            "required": ["category", "title", "content"],
+        },
+    },
+]
+
 
 class ToolExecutor:
     """Executes tools called by the LLM."""
@@ -499,6 +531,10 @@ class ToolExecutor:
     async def execute(self, user_id: str, tool_name: str, arguments: dict) -> dict[str, Any]:
         """Execute a tool and return the result."""
         logger.info(f"Executing tool {tool_name} for user {user_id} with args: {arguments}")
+
+        # Handle knowledge tools (no auth required)
+        if tool_name == "propose_knowledge":
+            return await self._propose_knowledge(arguments)
 
         # Handle Harvest tools
         if self._is_harvest_tool(tool_name):
@@ -853,3 +889,57 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Error executing Harvest tool {tool_name}: {e}", exc_info=True)
             return {"error": f"Failed to execute {tool_name}: {str(e)}"}
+
+    async def _propose_knowledge(self, arguments: dict) -> dict[str, Any]:
+        """Propose adding knowledge - creates a recommendation for user approval."""
+        from src.db import RecommendationsDB
+
+        category = arguments.get("category")
+        title = arguments.get("title")
+        content = arguments.get("content")
+        reason = arguments.get("reason", "")
+
+        valid_categories = ["strategy", "team", "processes", "clients", "projects"]
+        if category not in valid_categories:
+            return {"error": f"Invalid category. Must be one of: {valid_categories}"}
+
+        if not title or not content:
+            return {"error": "Both title and content are required"}
+
+        # Create a recommendation for user approval
+        rec_title = f"Knowledge Proposal: {title}"
+        rec_content = f"""**Proposed Knowledge Item**
+
+**Category:** {category}
+**Title:** {title}
+
+**Content:**
+{content}
+
+**Reason for adding:**
+{reason if reason else "Not specified"}
+
+---
+*To approve this knowledge, click "Approve" in the Recommendations page.*"""
+
+        rec_id = RecommendationsDB.create(
+            agent_name="chat",
+            title=rec_title,
+            content=rec_content,
+            priority="normal",
+            metadata={
+                "type": "knowledge_proposal",
+                "proposed_category": category,
+                "proposed_title": title,
+                "proposed_content": content,
+                "reason": reason,
+            },
+        )
+
+        logger.info(f"Created knowledge proposal recommendation {rec_id}: {title}")
+
+        return {
+            "success": True,
+            "message": f"Knowledge proposal created. The user will be asked to approve adding '{title}' to the {category} category.",
+            "recommendation_id": rec_id,
+        }

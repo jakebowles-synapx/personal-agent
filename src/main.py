@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,11 +10,24 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.agent import AgentOrchestrator
-from src.api import threads_router, memories_router, microsoft_router, harvest_router
-from src.api.threads import set_orchestrator as set_threads_orchestrator
+from src.api import (
+    threads_router,
+    memories_router,
+    microsoft_router,
+    harvest_router,
+    agents_router,
+    knowledge_router,
+    recommendations_router,
+)
+from src.api.threads import set_orchestrator as set_threads_orchestrator, set_chat_agent
 from src.api.memories import set_orchestrator as set_memories_orchestrator
 from src.api.microsoft import set_orchestrator as set_microsoft_orchestrator
 from src.api.harvest import set_orchestrator as set_harvest_orchestrator
+from src.api.agents import set_registry, set_scheduler
+from src.api.knowledge import set_knowledge_manager
+from src.api.recommendations import set_knowledge_manager_for_recommendations
+from src.config import settings
+from src.db import init_db
 
 # Configure logging
 logging.basicConfig(
@@ -22,42 +36,149 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global orchestrator
+# Global instances
 orchestrator: AgentOrchestrator | None = None
+scheduler = None
+registry = None
 
 # Path to React build
 WEB_DIR = Path(__file__).parent.parent / "web" / "dist"
 
 
+def _init_agents():
+    """Initialize the agent system (registry, agents, scheduler)."""
+    from src.agents import get_registry, get_message_bus
+    from src.agents.chat_agent import ChatAgent
+    from src.agents.briefing_agent import BriefingAgent
+    from src.agents.action_item_agent import ActionItemAgent
+    from src.agents.memory_agent import MemoryAgent
+    from src.agents.anomaly_agent import AnomalyAgent
+    from src.scheduler import AgentScheduler
+    from src.knowledge import KnowledgeManager
+    from src.agent.tools import ToolExecutor
+
+    global orchestrator, scheduler, registry
+
+    # Get shared instances
+    message_bus = get_message_bus()
+    registry = get_registry()
+
+    # Create knowledge manager
+    knowledge_manager = KnowledgeManager(llm_client=orchestrator.llm)
+
+    # Create tool executor with auth
+    tool_executor = ToolExecutor(orchestrator.auth)
+
+    # Register ChatAgent
+    chat_agent = ChatAgent(
+        message_bus=message_bus,
+        knowledge_manager=knowledge_manager,
+        memory_client=orchestrator.memory,
+        llm_client=orchestrator.llm,
+        conversation_history=orchestrator.history,
+        auth=orchestrator.auth,
+    )
+    registry.register(chat_agent)
+    set_chat_agent(chat_agent)  # Set for threads API
+
+    # Register BriefingAgent
+    briefing_agent = BriefingAgent(
+        message_bus=message_bus,
+        knowledge_manager=knowledge_manager,
+        memory_client=orchestrator.memory,
+        llm_client=orchestrator.llm,
+        auth=orchestrator.auth,
+        tool_executor=tool_executor,
+    )
+    registry.register(briefing_agent)
+
+    # Register ActionItemAgent
+    action_item_agent = ActionItemAgent(
+        message_bus=message_bus,
+        knowledge_manager=knowledge_manager,
+        memory_client=orchestrator.memory,
+        llm_client=orchestrator.llm,
+        auth=orchestrator.auth,
+        tool_executor=tool_executor,
+    )
+    registry.register(action_item_agent)
+
+    # Register MemoryAgent
+    memory_agent = MemoryAgent(
+        message_bus=message_bus,
+        knowledge_manager=knowledge_manager,
+        memory_client=orchestrator.memory,
+        llm_client=orchestrator.llm,
+        auth=orchestrator.auth,
+        tool_executor=tool_executor,
+    )
+    registry.register(memory_agent)
+
+    # Register AnomalyAgent
+    anomaly_agent = AnomalyAgent(
+        message_bus=message_bus,
+        knowledge_manager=knowledge_manager,
+        memory_client=orchestrator.memory,
+        llm_client=orchestrator.llm,
+        auth=orchestrator.auth,
+        tool_executor=tool_executor,
+    )
+    registry.register(anomaly_agent)
+
+    # Create and start scheduler
+    scheduler = AgentScheduler(registry)
+    scheduler.start()
+
+    # Set up API dependencies
+    set_registry(registry)
+    set_scheduler(scheduler)
+    set_knowledge_manager(knowledge_manager)
+    set_knowledge_manager_for_recommendations(knowledge_manager)
+
+    logger.info(f"Registered {len(registry.list_agents())} agents")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global orchestrator
+    global orchestrator, scheduler
 
     logger.info("Starting Personal Agent...")
 
-    # Initialize orchestrator
+    # Initialize database
+    init_db()
+    logger.info("Database initialized")
+
+    # Initialize orchestrator (legacy, for existing API compatibility)
     orchestrator = AgentOrchestrator()
 
-    # Set orchestrator for API routers
+    # Set orchestrator for API routers (legacy)
     set_threads_orchestrator(orchestrator)
     set_memories_orchestrator(orchestrator)
     set_microsoft_orchestrator(orchestrator)
     set_harvest_orchestrator(orchestrator)
 
-    logger.info("Agent started successfully!")
+    # Initialize agent system
+    _init_agents()
+
+    logger.info("Agent system started successfully!")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
+
+    if scheduler:
+        scheduler.stop()
+        logger.info("Scheduler stopped")
+
     logger.info("Shutdown complete.")
 
 
 app = FastAPI(
     title="Personal Agent",
     description="A personal AI assistant with web interface",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -66,11 +187,18 @@ app.include_router(threads_router)
 app.include_router(memories_router)
 app.include_router(microsoft_router)
 app.include_router(harvest_router)
+app.include_router(agents_router)
+app.include_router(knowledge_router)
+app.include_router(recommendations_router)
 
 
 @app.get("/api/health")
 async def health():
     """Health check endpoint."""
+    from src.recommendations.store import RecommendationStore
+
+    pending_recs = RecommendationStore.count_pending()
+
     return {
         "status": "healthy",
         "services": {
@@ -79,6 +207,11 @@ async def health():
             "llm": True,
             "microsoft": orchestrator.is_microsoft_connected() if orchestrator else False,
             "harvest": orchestrator.is_harvest_connected() if orchestrator else False,
+            "scheduler": scheduler.is_running() if scheduler else False,
+            "agents": len(registry.list_agents()) if registry else 0,
+        },
+        "recommendations": {
+            "pending": pending_recs,
         },
     }
 

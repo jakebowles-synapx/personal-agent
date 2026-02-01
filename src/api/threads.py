@@ -1,7 +1,7 @@
 """Thread and message API endpoints."""
 
 import logging
-from typing import Annotated
+from typing import Annotated, TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -9,12 +9,16 @@ from pydantic import BaseModel
 from src.agent import AgentOrchestrator
 from src.api.commands import is_command, execute_command
 
+if TYPE_CHECKING:
+    from src.agents.chat_agent import ChatAgent
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
 
-# Dependency to get orchestrator instance
+# Dependency to get orchestrator instance (legacy, for history management)
 _orchestrator: AgentOrchestrator | None = None
+_chat_agent: "ChatAgent | None" = None
 
 
 def get_orchestrator() -> AgentOrchestrator:
@@ -28,6 +32,19 @@ def set_orchestrator(orchestrator: AgentOrchestrator) -> None:
     """Set the global orchestrator instance."""
     global _orchestrator
     _orchestrator = orchestrator
+
+
+def get_chat_agent() -> "ChatAgent":
+    """Get the chat agent instance."""
+    if _chat_agent is None:
+        raise HTTPException(status_code=503, detail="Chat agent not initialized")
+    return _chat_agent
+
+
+def set_chat_agent(agent: "ChatAgent") -> None:
+    """Set the chat agent instance."""
+    global _chat_agent
+    _chat_agent = agent
 
 
 # Request/Response models
@@ -151,6 +168,9 @@ async def send_message(
     orchestrator: Annotated[AgentOrchestrator, Depends(get_orchestrator)],
 ):
     """Send a message and get AI response."""
+    # Get chat agent (uses knowledge integration)
+    chat_agent = get_chat_agent()
+
     thread = orchestrator.history.get_thread(thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -171,13 +191,13 @@ async def send_message(
                     "assistant_message": assistant_msg,
                 }
 
-        # Process regular message through orchestrator
-        response = await orchestrator.process_message(
-            thread_id=thread_id,
+        # Process regular message through ChatAgent (with knowledge integration)
+        response = await chat_agent.handle_chat(
             message=body.content,
+            thread_id=thread_id,
         )
 
-        # Get the last two messages (user + assistant)
+        # Get the last two messages (user + assistant) - ChatAgent stores them
         messages = orchestrator.history.get_thread_messages(thread_id, limit=2)
         if len(messages) < 2:
             raise HTTPException(status_code=500, detail="Failed to store messages")

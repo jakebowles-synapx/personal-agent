@@ -18,6 +18,7 @@ class AzureOpenAIClient:
             api_key=settings.azure_openai_api_key,
         )
         self.deployment = settings.azure_openai_deployment
+        self.embedding_deployment = settings.azure_openai_embedding_deployment
 
     async def chat(
         self,
@@ -114,3 +115,11 @@ class AzureOpenAIClient:
             "tool_calls": tool_calls if tool_calls else None,
             "response_id": response.id,
         }
+
+    async def get_embedding(self, text: str) -> list[float]:
+        """Get embedding vector for text using the embedding model."""
+        response = await self.client.embeddings.create(
+            model=self.embedding_deployment,
+            input=text,
+        )
+        return response.data[0].embedding

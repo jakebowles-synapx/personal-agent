@@ -68,6 +68,16 @@ Relevant context from our previous conversations:
 Use this context to inform your response, but don't explicitly mention that you're using memory unless the user asks about it.
 """
 
+KNOWLEDGE_CONTEXT_TEMPLATE = """
+# Fixed Knowledge
+
+The following is important context about the user's business:
+
+{knowledge}
+
+Use this knowledge to provide informed, contextual responses.
+"""
+
 
 def _extract_memory_text(m) -> str:
     """Extract text from a memory item (handles dict, string, and object formats)."""
@@ -87,6 +97,7 @@ def build_system_message(
     memories: list | None = None,
     ms_connected: bool = False,
     harvest_connected: bool = False,
+    knowledge_context: str | None = None,
 ) -> str:
     """Build the system message with optional memory context and service status."""
     current_date = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
@@ -103,6 +114,10 @@ def build_system_message(
         system_message += SYSTEM_PROMPT_HARVEST_CONNECTED
     else:
         system_message += SYSTEM_PROMPT_HARVEST_NOT_CONNECTED
+
+    # Add fixed knowledge context
+    if knowledge_context:
+        system_message += KNOWLEDGE_CONTEXT_TEMPLATE.format(knowledge=knowledge_context)
 
     # Add memory context
     if memories:

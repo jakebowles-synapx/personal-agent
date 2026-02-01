@@ -36,5 +36,12 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:8000"  # Used for OAuth redirect
     data_dir: str = "."  # Directory for SQLite databases
 
+    # Scheduler - cron format schedules
+    scheduler_enabled: bool = True
+    briefing_schedule: str = "0 7 * * *"  # Daily at 7am
+    action_item_schedule: str = "0 */2 * * *"  # Every 2 hours
+    memory_schedule: str = "0 * * * *"  # Hourly
+    anomaly_schedule: str = "0 */4 * * *"  # Every 4 hours
+
 
 settings = Settings()

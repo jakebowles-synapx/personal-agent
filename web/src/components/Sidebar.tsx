@@ -74,11 +74,43 @@ export default function Sidebar({
 
       <nav className="sidebar-nav">
         <Link
+          to="/dashboard"
+          className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`}
+          onClick={onClose}
+        >
+          <span>&#128200;</span>
+          Dashboard
+        </Link>
+        <Link
+          to="/recommendations"
+          className={`nav-item ${location.pathname === '/recommendations' ? 'active' : ''}`}
+          onClick={onClose}
+        >
+          <span>&#128161;</span>
+          Recommendations
+        </Link>
+        <Link
+          to="/knowledge"
+          className={`nav-item ${location.pathname === '/knowledge' ? 'active' : ''}`}
+          onClick={onClose}
+        >
+          <span>&#128218;</span>
+          Knowledge
+        </Link>
+        <Link
+          to="/agents"
+          className={`nav-item ${location.pathname === '/agents' ? 'active' : ''}`}
+          onClick={onClose}
+        >
+          <span>&#129302;</span>
+          Agents
+        </Link>
+        <Link
           to="/memories"
           className={`nav-item ${location.pathname === '/memories' ? 'active' : ''}`}
           onClick={onClose}
         >
-          <span>&#128218;</span>
+          <span>&#128065;</span>
           Memories
         </Link>
         <Link
