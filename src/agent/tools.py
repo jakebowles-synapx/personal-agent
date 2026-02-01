@@ -275,6 +275,72 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "type": "function",
+        "name": "get_file_content",
+        "description": "Downloads and extracts text content from a file using its file_id and drive_id. Supports .docx, .xlsx, .pptx, .pdf, and text files. Use read_document instead if you want to search and read in one step.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": "The ID of the file to download (get this from search_files or get_recent_files)",
+                },
+                "drive_id": {
+                    "type": "string",
+                    "description": "The drive ID (required for SharePoint files, get this from search_files results)",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_document",
+        "description": "ALWAYS use this tool when the user asks to read, open, summarize, or analyze a document. Searches for the document by name, downloads it, and extracts the text content. Supports .docx, .xlsx, .pptx, .pdf, and text files. This is the preferred tool for reading documents.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The name or partial name of the file to find and read (e.g., 'FRP SOW', 'quarterly report', 'budget.xlsx')",
+                },
+            },
+            "required": ["filename"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_messages_from_person",
+        "description": "Get recent messages from a specific person. Searches both emails and Teams chat messages. Use this when the user asks 'what did X say?', 'any messages from X?', 'what was the latest from X?', or similar queries about a specific person.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "string",
+                    "description": "The name or email of the person to search for (e.g., 'Charlie', 'John Smith', 'john@company.com')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of messages to return from each source (default: 15)",
+                },
+                "teams_chat_type": {
+                    "type": "string",
+                    "enum": ["oneOnOne", "group", "all"],
+                    "description": "Filter Teams messages by chat type: 'oneOnOne' for 1:1/direct chats only, 'group' for group chats only, 'all' for both (default: all)",
+                },
+                "include_context": {
+                    "type": "boolean",
+                    "description": "If true, include your replies in the results to show full conversation context (default: false)",
+                },
+                "unread_only": {
+                    "type": "boolean",
+                    "description": "If true, only return unread emails (default: false). Note: Teams doesn't have per-message read status.",
+                },
+            },
+            "required": ["person"],
+        },
+    },
 ]
 
 
@@ -377,6 +443,58 @@ class ToolExecutor:
                 result = await graph.get_recent_files(limit=limit)
                 return {"files": result, "count": len(result)}
 
+            elif tool_name == "get_file_content":
+                file_id = arguments.get("file_id")
+                if not file_id:
+                    return {"error": "file_id is required. Use search_files or get_recent_files to find the file ID first."}
+                drive_id = arguments.get("drive_id")
+                logger.info(f"get_file_content: file_id={file_id}, drive_id={drive_id}")
+                result = await graph.get_file_content(file_id=file_id, drive_id=drive_id)
+                logger.info(f"get_file_content result keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
+                if "content" in result:
+                    logger.info(f"get_file_content: got {len(result.get('content', ''))} chars of content")
+                elif "error" in result:
+                    logger.error(f"get_file_content error: {result.get('error')}")
+                return result
+
+            elif tool_name == "read_document":
+                filename = arguments.get("filename")
+                if not filename:
+                    return {"error": "filename is required (name or partial name of the document to read)"}
+
+                logger.info(f"read_document: searching for '{filename}'")
+
+                # Step 1: Search for the file
+                files = await graph.search_files(query=filename, limit=5)
+                if not files:
+                    return {"error": f"No files found matching '{filename}'", "suggestion": "Try a different search term"}
+
+                logger.info(f"read_document: found {len(files)} files, using first match: {files[0].get('name')}")
+
+                # Step 2: Get the first matching file's content
+                file = files[0]
+                file_id = file.get("id")
+                drive_id = file.get("drive_id")
+
+                if not file_id:
+                    return {"error": "Could not get file ID from search results"}
+
+                logger.info(f"read_document: downloading file_id={file_id}, drive_id={drive_id}")
+                result = await graph.get_file_content(file_id=file_id, drive_id=drive_id)
+
+                # Add search info to result
+                result["search_query"] = filename
+                result["matched_file"] = file.get("name")
+                if len(files) > 1:
+                    result["other_matches"] = [f.get("name") for f in files[1:]]
+
+                if "content" in result:
+                    logger.info(f"read_document: got {len(result.get('content', ''))} chars of content")
+                elif "error" in result:
+                    logger.error(f"read_document error: {result.get('error')}")
+
+                return result
+
             elif tool_name == "get_recent_meetings":
                 meetings_client = MeetingInsightsClient(access_token)
                 days_back = min(arguments.get("days_back", 30), 90)
@@ -427,6 +545,38 @@ class ToolExecutor:
                     "count": len(result),
                     "with_transcripts": sum(1 for m in result if m.get("has_transcripts")),
                     "note": "Only shows meetings you organized. Transcripts require transcription to be enabled during the meeting."
+                }
+
+            elif tool_name == "get_messages_from_person":
+                person = arguments.get("person")
+                if not person:
+                    return {"error": "person is required (name or email of the person to search for)"}
+                limit = min(arguments.get("limit", 15), 30)
+                teams_chat_type = arguments.get("teams_chat_type")
+                if teams_chat_type == "all":
+                    teams_chat_type = None
+                include_context = arguments.get("include_context", False)
+                unread_only = arguments.get("unread_only", False)
+
+                # Get emails from person
+                emails = await graph.get_emails_from_person(
+                    person=person, limit=limit, unread_only=unread_only
+                )
+
+                # Get Teams messages from person
+                teams_messages = await graph.get_teams_messages_from_person(
+                    person=person, limit=limit, chat_type=teams_chat_type, include_context=include_context
+                )
+
+                return {
+                    "person": person,
+                    "teams_chat_type_filter": teams_chat_type or "all",
+                    "include_context": include_context,
+                    "unread_only": unread_only,
+                    "emails": emails,
+                    "email_count": len(emails),
+                    "teams_messages": teams_messages,
+                    "teams_count": len(teams_messages),
                 }
 
             else:
