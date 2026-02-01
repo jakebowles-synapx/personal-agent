@@ -12,20 +12,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Telegram
-    telegram_bot_token: str
-    telegram_webhook_url: str
-
     # Azure OpenAI
     azure_openai_endpoint: str
     azure_openai_api_key: str
     azure_openai_deployment: str = "gpt-4"
     azure_openai_embedding_deployment: str = "text-embedding-ada-002"
 
-    # Azure AD (Microsoft Graph) - Phase 2
+    # Azure AD (Microsoft Graph)
     azure_client_id: str = ""
     azure_client_secret: str = ""
     azure_tenant_id: str = ""
+
+    # Harvest
+    harvest_account_id: str = ""
+    harvest_access_token: str = ""
 
     # Memory
     qdrant_host: str = "localhost"
@@ -33,14 +33,8 @@ class Settings(BaseSettings):
 
     # App
     app_secret_key: str
-    allowed_telegram_users: str = ""
-
-    @property
-    def allowed_user_ids(self) -> set[int]:
-        """Parse allowed Telegram user IDs from comma-separated string."""
-        if not self.allowed_telegram_users:
-            return set()
-        return {int(uid.strip()) for uid in self.allowed_telegram_users.split(",") if uid.strip()}
+    app_base_url: str = "http://localhost:8000"  # Used for OAuth redirect
+    data_dir: str = "."  # Directory for SQLite databases
 
 
 settings = Settings()

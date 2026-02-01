@@ -2,9 +2,6 @@
 fastapi>=0.109.0
 uvicorn>=0.27.0
 
-# Telegram
-python-telegram-bot>=21.0
-
 # LLM
 openai>=1.12.0
 azure-identity>=1.15.0
@@ -13,7 +10,7 @@ azure-identity>=1.15.0
 mem0ai>=0.1.0
 qdrant-client>=1.7.0
 
-# Microsoft (Phase 2)
+# Microsoft
 msal>=1.26.0
 httpx>=0.26.0
 

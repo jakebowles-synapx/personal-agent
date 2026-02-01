@@ -114,11 +114,11 @@ class TokenStore:
 class MicrosoftAuth:
     """Handles Microsoft OAuth authentication."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str = "tokens.db") -> None:
         self.client_id = settings.azure_client_id
         self.client_secret = settings.azure_client_secret
         self.tenant_id = settings.azure_tenant_id
-        self.redirect_uri = settings.telegram_webhook_url.replace("/webhook", "/auth/callback")
+        self.redirect_uri = f"{settings.app_base_url}/auth/callback"
 
         self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
 
@@ -128,7 +128,7 @@ class MicrosoftAuth:
             authority=self.authority,
         )
 
-        self.token_store = TokenStore()
+        self.token_store = TokenStore(db_path=db_path)
         self._pending_states: dict[str, str] = {}  # state -> user_id mapping
 
     def get_auth_url(self, user_id: str) -> str:

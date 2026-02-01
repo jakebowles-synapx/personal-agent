@@ -1,0 +1,26 @@
+# Dependencies
+web/node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output (we build in Docker)
+web/dist/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local data
+*.db
+.env.backup*
+
+# Misc
+*.md
+.DS_Store

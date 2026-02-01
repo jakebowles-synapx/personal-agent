@@ -37,6 +37,30 @@ SYSTEM_PROMPT_MS_NOT_CONNECTED = """
 Note: The user has not connected their Microsoft 365 account yet. If they ask about their calendar, emails, Teams, or files, let them know they can connect their account using the /connect command to enable these features.
 """
 
+SYSTEM_PROMPT_HARVEST_CONNECTED = """
+You have access to Harvest time tracking. You can:
+- View team members and their capacity/roles
+- Check time entries for individuals or projects
+- See project budgets and status
+- Generate team utilization reports
+- Generate project time reports
+
+When the user asks about team hours, project budgets, time tracking, or utilization, use the appropriate Harvest tools.
+
+Available Harvest tools:
+- harvest_get_team: List all team members with capacity
+- harvest_get_team_member: Get a specific person's details and project assignments
+- harvest_get_time_entries: Get time entries with date/user/project filters
+- harvest_get_projects: List projects with budget info
+- harvest_get_project_details: Get detailed project info including budget status
+- harvest_team_report: Team utilization summary (hours by person)
+- harvest_project_report: Project hours summary
+"""
+
+SYSTEM_PROMPT_HARVEST_NOT_CONNECTED = """
+Note: Harvest time tracking is not configured. If the user asks about time tracking, team hours, or project budgets, let them know Harvest integration is available but needs to be configured.
+"""
+
 MEMORY_CONTEXT_TEMPLATE = """
 Relevant context from our previous conversations:
 {memories}
@@ -59,8 +83,12 @@ def _extract_memory_text(m) -> str:
     return str(m)
 
 
-def build_system_message(memories: list | None = None, ms_connected: bool = False) -> str:
-    """Build the system message with optional memory context and Microsoft status."""
+def build_system_message(
+    memories: list | None = None,
+    ms_connected: bool = False,
+    harvest_connected: bool = False,
+) -> str:
+    """Build the system message with optional memory context and service status."""
     current_date = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
     system_message = SYSTEM_PROMPT_BASE.format(current_date=current_date)
 
@@ -69,6 +97,12 @@ def build_system_message(memories: list | None = None, ms_connected: bool = Fals
         system_message += SYSTEM_PROMPT_MS_CONNECTED
     else:
         system_message += SYSTEM_PROMPT_MS_NOT_CONNECTED
+
+    # Add Harvest-specific instructions
+    if harvest_connected:
+        system_message += SYSTEM_PROMPT_HARVEST_CONNECTED
+    else:
+        system_message += SYSTEM_PROMPT_HARVEST_NOT_CONNECTED
 
     # Add memory context
     if memories:

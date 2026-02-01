@@ -7,6 +7,8 @@ from typing import Any
 from src.microsoft.auth import MicrosoftAuth
 from src.microsoft.graph_client import GraphClient
 from src.microsoft.copilot_client import MeetingInsightsClient
+from src.harvest import HarvestClient
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +345,135 @@ TOOLS = [
     },
 ]
 
+# Harvest tools - only included when Harvest is configured
+HARVEST_TOOLS = [
+    {
+        "type": "function",
+        "name": "harvest_get_team",
+        "description": "Get all team members from Harvest with their roles and weekly capacity. Use this when the user asks 'who's on my team?', 'show team members', 'list the team', or wants to see team capacity.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "is_active": {
+                    "type": "boolean",
+                    "description": "Filter by active status (default: true for active team members only)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_get_team_member",
+        "description": "Get details for a specific team member including their project assignments. Use this when the user asks 'how's [name] doing?', 'show me [name]'s assignments', or wants info about a specific person.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "description": "The Harvest user ID (get from harvest_get_team first)",
+                },
+            },
+            "required": ["user_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_get_time_entries",
+        "description": "Get time entries from Harvest with optional filters. Use this when the user asks 'what did [name] work on?', 'hours logged this week', 'show time entries', or wants to see tracked time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "from_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (e.g., '2025-01-20')",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (e.g., '2025-01-27')",
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "Filter by specific user ID",
+                },
+                "project_id": {
+                    "type": "integer",
+                    "description": "Filter by specific project ID",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_get_projects",
+        "description": "Get projects from Harvest with client and budget info. Use this when the user asks 'what projects are active?', 'show current projects', 'list projects', or wants to see project overview.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "is_active": {
+                    "type": "boolean",
+                    "description": "Filter by active status (default: true for active projects only)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_get_project_details",
+        "description": "Get detailed info for a specific project including budget status. Use this when the user asks 'how's [project] going?', 'budget status for [project]', or wants detailed project info.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "integer",
+                    "description": "The Harvest project ID (get from harvest_get_projects first)",
+                },
+            },
+            "required": ["project_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_team_report",
+        "description": "Get team utilization report showing hours by person. Use this when the user asks 'team utilization', 'who worked most this week?', 'team hours summary', or wants to see how the team spent their time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "from_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (default: 7 days ago)",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (default: today)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_project_report",
+        "description": "Get project hours summary showing time spent by project. Use this when the user asks 'project hours summary', 'where is time going?', 'time by project', or wants to see project-level time allocation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "from_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (default: 7 days ago)",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (default: today)",
+                },
+            },
+            "required": [],
+        },
+    },
+]
+
 
 class ToolExecutor:
     """Executes tools called by the LLM."""
@@ -350,9 +481,28 @@ class ToolExecutor:
     def __init__(self, auth: MicrosoftAuth) -> None:
         self.auth = auth
 
+    def _is_harvest_tool(self, tool_name: str) -> bool:
+        """Check if a tool is a Harvest tool."""
+        return tool_name.startswith("harvest_")
+
+    def _is_harvest_connected(self) -> bool:
+        """Check if Harvest is configured."""
+        return bool(settings.harvest_account_id and settings.harvest_access_token)
+
+    def _get_harvest_client(self) -> HarvestClient:
+        """Get a Harvest client instance."""
+        return HarvestClient(
+            account_id=settings.harvest_account_id,
+            access_token=settings.harvest_access_token,
+        )
+
     async def execute(self, user_id: str, tool_name: str, arguments: dict) -> dict[str, Any]:
         """Execute a tool and return the result."""
         logger.info(f"Executing tool {tool_name} for user {user_id} with args: {arguments}")
+
+        # Handle Harvest tools
+        if self._is_harvest_tool(tool_name):
+            return await self._execute_harvest_tool(tool_name, arguments)
 
         # Check if user is connected to Microsoft
         if not self.auth.is_connected(user_id):
@@ -587,4 +737,119 @@ class ToolExecutor:
             return {"error": str(e), "needs_reconnection": True}
         except Exception as e:
             logger.error(f"Error executing {tool_name}: {e}", exc_info=True)
+            return {"error": f"Failed to execute {tool_name}: {str(e)}"}
+
+    async def _execute_harvest_tool(self, tool_name: str, arguments: dict) -> dict[str, Any]:
+        """Execute a Harvest tool."""
+        from datetime import datetime, timedelta, timezone
+
+        if not self._is_harvest_connected():
+            return {
+                "error": "Harvest not configured. Please set HARVEST_ACCOUNT_ID and HARVEST_ACCESS_TOKEN.",
+                "needs_configuration": True,
+            }
+
+        harvest = self._get_harvest_client()
+
+        try:
+            if tool_name == "harvest_get_team":
+                is_active = arguments.get("is_active", True)
+                result = await harvest.get_users(is_active=is_active)
+                return {"team_members": result, "count": len(result)}
+
+            elif tool_name == "harvest_get_team_member":
+                user_id = arguments.get("user_id")
+                if not user_id:
+                    return {"error": "user_id is required. Use harvest_get_team first to get user IDs."}
+
+                # Get user details and their project assignments
+                user = await harvest.get_user(user_id)
+                assignments = await harvest.get_user_project_assignments(user_id)
+
+                return {
+                    "user": user,
+                    "project_assignments": assignments,
+                    "assignment_count": len(assignments),
+                }
+
+            elif tool_name == "harvest_get_time_entries":
+                from_date = arguments.get("from_date")
+                to_date = arguments.get("to_date")
+                user_id = arguments.get("user_id")
+                project_id = arguments.get("project_id")
+
+                # Default to last 7 days if no dates provided
+                if not from_date and not to_date:
+                    to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    from_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
+                result = await harvest.get_time_entries(
+                    from_date=from_date,
+                    to_date=to_date,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+
+                total_hours = sum(entry["hours"] for entry in result)
+                return {
+                    "time_entries": result,
+                    "count": len(result),
+                    "total_hours": round(total_hours, 2),
+                    "from_date": from_date,
+                    "to_date": to_date,
+                }
+
+            elif tool_name == "harvest_get_projects":
+                is_active = arguments.get("is_active", True)
+                result = await harvest.get_projects(is_active=is_active)
+                return {"projects": result, "count": len(result)}
+
+            elif tool_name == "harvest_get_project_details":
+                project_id = arguments.get("project_id")
+                if not project_id:
+                    return {"error": "project_id is required. Use harvest_get_projects first to get project IDs."}
+
+                # Get project details and budget status
+                project = await harvest.get_project(project_id)
+                budget = await harvest.get_project_budget(project_id)
+
+                return {
+                    "project": project,
+                    "budget_status": budget,
+                }
+
+            elif tool_name == "harvest_team_report":
+                from_date = arguments.get("from_date")
+                to_date = arguments.get("to_date")
+
+                # Default to last 7 days if no dates provided
+                if not to_date:
+                    to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if not from_date:
+                    from_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
+                result = await harvest.get_team_time_report(from_date=from_date, to_date=to_date)
+                return result
+
+            elif tool_name == "harvest_project_report":
+                from_date = arguments.get("from_date")
+                to_date = arguments.get("to_date")
+
+                # Default to last 7 days if no dates provided
+                if not to_date:
+                    to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if not from_date:
+                    from_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
+                result = await harvest.get_project_time_report(from_date=from_date, to_date=to_date)
+                return result
+
+            else:
+                return {"error": f"Unknown Harvest tool: {tool_name}"}
+
+        except PermissionError as e:
+            logger.error(f"Harvest permission error: {e}")
+            return {"error": str(e), "needs_configuration": True}
+        except Exception as e:
+            logger.error(f"Error executing Harvest tool {tool_name}: {e}", exc_info=True)
             return {"error": f"Failed to execute {tool_name}: {str(e)}"}
