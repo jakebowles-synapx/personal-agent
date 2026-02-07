@@ -111,6 +111,7 @@ class GraphClient:
     async def get_emails(
         self,
         limit: int = 10,
+        skip: int = 0,
         search: str | None = None,
         folder: str = "inbox",
     ) -> list[dict]:
@@ -119,6 +120,9 @@ class GraphClient:
             "$top": limit,
             "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead,importance",
         }
+
+        if skip > 0:
+            params["$skip"] = skip
 
         if search:
             # Note: $orderby is not supported with $search
@@ -322,27 +326,32 @@ class GraphClient:
 
     # ==================== TEAMS ====================
 
-    async def get_teams_chats(self, limit: int = 10) -> list[dict]:
+    async def get_teams_chats(self, limit: int = 10, skip: int = 0) -> list[dict]:
         """Get recent Teams chats."""
         params = {
             "$top": limit,
             "$orderby": "lastMessagePreview/createdDateTime desc",
             "$expand": "lastMessagePreview",
         }
+        if skip > 0:
+            params["$skip"] = skip
 
         result = await self._request("GET", "/me/chats", params=params)
 
         chats = []
         for chat in result.get("value", []):
-            last_msg = chat.get("lastMessagePreview", {})
+            last_msg = chat.get("lastMessagePreview") or {}
+            last_msg_body = last_msg.get("body") or {}
+            last_msg_from = last_msg.get("from") or {}
+            last_msg_user = last_msg_from.get("user") or {}
 
             chats.append({
                 "id": chat["id"],
                 "topic": chat.get("topic", ""),
                 "chat_type": chat.get("chatType", ""),
-                "last_message": last_msg.get("body", {}).get("content", "")[:100] if last_msg else "",
-                "last_message_from": last_msg.get("from", {}).get("user", {}).get("displayName", "") if last_msg else "",
-                "last_message_time": last_msg.get("createdDateTime", "") if last_msg else "",
+                "last_message": last_msg_body.get("content", "")[:100] if last_msg_body else "",
+                "last_message_from": last_msg_user.get("displayName", ""),
+                "last_message_time": last_msg.get("createdDateTime", ""),
             })
 
         return chats
@@ -358,13 +367,14 @@ class GraphClient:
 
         messages = []
         for msg in result.get("value", []):
-            from_user = msg.get("from", {})
-            user_info = from_user.get("user", {}) if from_user else {}
+            from_user = msg.get("from") or {}
+            user_info = from_user.get("user") or {}
+            body = msg.get("body") or {}
 
             messages.append({
                 "id": msg["id"],
-                "content": msg.get("body", {}).get("content", ""),
-                "content_type": msg.get("body", {}).get("contentType", "text"),
+                "content": body.get("content", ""),
+                "content_type": body.get("contentType", "text"),
                 "from": user_info.get("displayName", "Unknown"),
                 "from_email": user_info.get("email", ""),
                 "created": msg.get("createdDateTime", ""),
@@ -668,7 +678,7 @@ class GraphClient:
 
                 chat_messages = msg_result.get("value", [])
                 has_person_message = any(
-                    person_lower in (msg.get("from", {}).get("user", {}).get("displayName", "") or "").lower()
+                    person_lower in ((msg.get("from") or {}).get("user") or {}).get("displayName", "").lower()
                     for msg in chat_messages
                 )
 
@@ -687,10 +697,11 @@ class GraphClient:
         # Process messages
         for chat_info in chats_with_person:
             for msg in chat_info["messages"]:
-                from_user = msg.get("from", {})
-                user_info = from_user.get("user", {}) if from_user else {}
-                display_name = user_info.get("displayName", "")
-                content = msg.get("body", {}).get("content", "")
+                from_user = msg.get("from") or {}
+                user_info = from_user.get("user") or {}
+                display_name = user_info.get("displayName", "") or ""
+                body = msg.get("body") or {}
+                content = body.get("content", "") or ""
 
                 if not content or msg.get("messageType") != "message":
                     continue
@@ -705,7 +716,7 @@ class GraphClient:
                         "chat_topic": chat_info["chat_topic"],
                         "chat_type": chat_info["chat_type"],
                         "content": content[:500],
-                        "content_type": msg.get("body", {}).get("contentType", "text"),
+                        "content_type": body.get("contentType", "text"),
                         "from": display_name,
                         "from_email": user_info.get("email", ""),
                         "created": msg.get("createdDateTime", ""),
@@ -736,3 +747,441 @@ class GraphClient:
             "department": result.get("department", ""),
             "office": result.get("officeLocation", ""),
         }
+
+    # ==================== EMAIL EXTENSIONS ====================
+
+    async def get_unread_emails(self, limit: int = 10) -> list[dict]:
+        """Get unread emails only."""
+        params = {
+            "$top": limit,
+            "$filter": "isRead eq false",
+            "$orderby": "receivedDateTime desc",
+            "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead,importance",
+        }
+
+        result = await self._request("GET", "/me/mailFolders/inbox/messages", params=params)
+
+        emails = []
+        for msg in result.get("value", []):
+            emails.append({
+                "id": msg["id"],
+                "subject": msg.get("subject", "(No subject)"),
+                "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Unknown"),
+                "from_name": msg.get("from", {}).get("emailAddress", {}).get("name", ""),
+                "received": msg.get("receivedDateTime", ""),
+                "preview": msg.get("bodyPreview", "")[:200],
+                "importance": msg.get("importance", "normal"),
+            })
+
+        return emails
+
+    async def get_unread_email_count(self) -> dict:
+        """Get count of unread emails."""
+        params = {
+            "$filter": "isRead eq false",
+            "$count": "true",
+        }
+        result = await self._request("GET", "/me/mailFolders/inbox/messages", params=params)
+        return {"unread_count": result.get("@odata.count", len(result.get("value", [])))}
+
+    async def get_sent_emails(self, limit: int = 10) -> list[dict]:
+        """Get sent emails."""
+        params = {
+            "$top": limit,
+            "$orderby": "sentDateTime desc",
+            "$select": "id,subject,toRecipients,sentDateTime,bodyPreview",
+        }
+
+        result = await self._request("GET", "/me/mailFolders/sentitems/messages", params=params)
+
+        emails = []
+        for msg in result.get("value", []):
+            to_recipients = [
+                r.get("emailAddress", {}).get("address", "")
+                for r in msg.get("toRecipients", [])
+            ]
+            emails.append({
+                "id": msg["id"],
+                "subject": msg.get("subject", "(No subject)"),
+                "to": to_recipients,
+                "sent": msg.get("sentDateTime", ""),
+                "preview": msg.get("bodyPreview", "")[:200],
+            })
+
+        return emails
+
+    async def get_flagged_emails(self, limit: int = 10) -> list[dict]:
+        """Get flagged/starred emails."""
+        params = {
+            "$top": limit,
+            "$filter": "flag/flagStatus eq 'flagged'",
+            "$orderby": "receivedDateTime desc",
+            "$select": "id,subject,from,receivedDateTime,bodyPreview,flag",
+        }
+
+        result = await self._request("GET", "/me/messages", params=params)
+
+        emails = []
+        for msg in result.get("value", []):
+            emails.append({
+                "id": msg["id"],
+                "subject": msg.get("subject", "(No subject)"),
+                "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Unknown"),
+                "from_name": msg.get("from", {}).get("emailAddress", {}).get("name", ""),
+                "received": msg.get("receivedDateTime", ""),
+                "preview": msg.get("bodyPreview", "")[:200],
+                "flag_status": msg.get("flag", {}).get("flagStatus", ""),
+            })
+
+        return emails
+
+    # ==================== CALENDAR EXTENSIONS ====================
+
+    async def get_next_event(self) -> dict | None:
+        """Get just the next upcoming event."""
+        now = datetime.now(timezone.utc)
+        end_dt = now + timedelta(days=7)
+
+        params = {
+            "startDateTime": now.isoformat(),
+            "endDateTime": end_dt.isoformat(),
+            "$orderby": "start/dateTime",
+            "$top": 1,
+            "$select": "id,subject,start,end,location,isOnlineMeeting,onlineMeetingUrl,organizer",
+        }
+
+        result = await self._request("GET", "/me/calendarView", params=params)
+
+        events = result.get("value", [])
+        if not events:
+            return None
+
+        event = events[0]
+        return {
+            "id": event["id"],
+            "subject": event.get("subject", "(No title)"),
+            "start": event.get("start", {}).get("dateTime", ""),
+            "start_timezone": event.get("start", {}).get("timeZone", "UTC"),
+            "end": event.get("end", {}).get("dateTime", ""),
+            "location": event.get("location", {}).get("displayName", ""),
+            "is_online": event.get("isOnlineMeeting", False),
+            "online_url": event.get("onlineMeetingUrl", ""),
+            "organizer": event.get("organizer", {}).get("emailAddress", {}).get("name", ""),
+        }
+
+    async def find_free_time(
+        self,
+        duration_minutes: int = 30,
+        days: int = 7,
+    ) -> list[dict]:
+        """Find free time slots in calendar."""
+        now = datetime.now(timezone.utc)
+        end_dt = now + timedelta(days=days)
+
+        # Get all events in the range
+        events = await self.get_calendar_events(days=days, past_days=0, limit=100)
+
+        # Sort events by start time
+        events.sort(key=lambda x: x.get("start", ""))
+
+        free_slots = []
+        current_time = now
+
+        for event in events:
+            event_start = datetime.fromisoformat(event["start"].replace("Z", "+00:00"))
+
+            # If there's a gap before this event
+            gap_minutes = (event_start - current_time).total_seconds() / 60
+            if gap_minutes >= duration_minutes:
+                free_slots.append({
+                    "start": current_time.isoformat(),
+                    "end": event_start.isoformat(),
+                    "duration_minutes": int(gap_minutes),
+                })
+
+            # Move current time to end of this event
+            event_end = datetime.fromisoformat(event["end"].replace("Z", "+00:00"))
+            if event_end > current_time:
+                current_time = event_end
+
+        # Check if there's free time after the last event
+        if current_time < end_dt:
+            gap_minutes = (end_dt - current_time).total_seconds() / 60
+            if gap_minutes >= duration_minutes:
+                free_slots.append({
+                    "start": current_time.isoformat(),
+                    "end": end_dt.isoformat(),
+                    "duration_minutes": int(gap_minutes),
+                })
+
+        return free_slots[:10]
+
+    async def get_events_with_person(self, person: str, days: int = 30) -> list[dict]:
+        """Get calendar events with a specific attendee."""
+        events = await self.get_calendar_events(days=days, past_days=days, limit=100)
+
+        person_lower = person.lower()
+        matching_events = []
+
+        for event in events:
+            attendees = event.get("attendees", [])
+            for attendee in attendees:
+                name = attendee.get("name", "").lower()
+                email = attendee.get("email", "").lower()
+                if person_lower in name or person_lower in email:
+                    matching_events.append(event)
+                    break
+
+        return matching_events
+
+    async def get_week_summary(self) -> dict:
+        """Summarize the week's meetings (count, total hours)."""
+        now = datetime.now(timezone.utc)
+        # Get start of current week (Monday)
+        start_of_week = now - timedelta(days=now.weekday())
+        start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_week = start_of_week + timedelta(days=7)
+
+        params = {
+            "startDateTime": start_of_week.isoformat(),
+            "endDateTime": end_of_week.isoformat(),
+            "$select": "id,subject,start,end",
+        }
+
+        result = await self._request("GET", "/me/calendarView", params=params)
+        events = result.get("value", [])
+
+        total_hours = 0
+        for event in events:
+            start = datetime.fromisoformat(event.get("start", {}).get("dateTime", "").replace("Z", "+00:00"))
+            end = datetime.fromisoformat(event.get("end", {}).get("dateTime", "").replace("Z", "+00:00"))
+            duration_hours = (end - start).total_seconds() / 3600
+            total_hours += duration_hours
+
+        return {
+            "week_start": start_of_week.isoformat(),
+            "week_end": end_of_week.isoformat(),
+            "meeting_count": len(events),
+            "total_hours": round(total_hours, 2),
+            "average_per_day": round(total_hours / 5, 2) if events else 0,
+        }
+
+    # ==================== TEAMS EXTENSIONS ====================
+
+    async def search_teams_messages(self, query: str, limit: int = 20) -> list[dict]:
+        """Search Teams messages by keyword."""
+        # Get recent chats
+        chats = await self.get_teams_chats(limit=50)
+
+        query_lower = query.lower()
+        matching_messages = []
+
+        for chat in chats:
+            chat_id = chat["id"]
+            try:
+                messages = await self.get_chat_messages(chat_id=chat_id, limit=50)
+                for msg in messages:
+                    content = msg.get("content", "").lower()
+                    if query_lower in content:
+                        msg["chat_id"] = chat_id
+                        msg["chat_topic"] = chat.get("topic", "")
+                        matching_messages.append(msg)
+
+                        if len(matching_messages) >= limit:
+                            break
+            except Exception as e:
+                logger.warning(f"Failed to search chat {chat_id}: {e}")
+                continue
+
+            if len(matching_messages) >= limit:
+                break
+
+        return matching_messages
+
+    async def get_chat_with_person(self, person: str) -> dict | None:
+        """Get the 1:1 chat thread with a specific person."""
+        chats = await self.get_teams_chats(limit=50)
+
+        person_lower = person.lower()
+        for chat in chats:
+            if chat.get("chat_type") != "oneOnOne":
+                continue
+
+            # Check if this chat involves the person
+            chat_id = chat["id"]
+            try:
+                # Get chat members
+                result = await self._request("GET", f"/me/chats/{chat_id}/members")
+                members = result.get("value", [])
+
+                for member in members:
+                    display_name = member.get("displayName", "").lower()
+                    email = member.get("email", "").lower()
+                    if person_lower in display_name or person_lower in email:
+                        # Found the chat, get recent messages
+                        messages = await self.get_chat_messages(chat_id=chat_id, limit=20)
+                        return {
+                            "chat_id": chat_id,
+                            "person": member.get("displayName", ""),
+                            "email": member.get("email", ""),
+                            "messages": messages,
+                            "message_count": len(messages),
+                        }
+            except Exception as e:
+                logger.warning(f"Failed to get chat members: {e}")
+                continue
+
+        return None
+
+    async def get_group_chats(self, limit: int = 10) -> list[dict]:
+        """Get group chats only."""
+        chats = await self.get_teams_chats(limit=50)
+        group_chats = [c for c in chats if c.get("chat_type") == "group"]
+        return group_chats[:limit]
+
+    async def get_recent_mentions(self, limit: int = 20) -> list[dict]:
+        """Find messages where user is mentioned."""
+        # Get current user info for matching mentions
+        me = await self.get_me()
+        my_name = me.get("name", "").lower()
+        my_email = me.get("email", "").lower()
+
+        chats = await self.get_teams_chats(limit=50)
+        mentions = []
+
+        for chat in chats:
+            chat_id = chat["id"]
+            try:
+                messages = await self.get_chat_messages(chat_id=chat_id, limit=50)
+                for msg in messages:
+                    content = msg.get("content", "").lower()
+                    # Check for @mentions (usually in HTML format)
+                    if my_name in content or my_email in content or "@" + my_name in content:
+                        msg["chat_id"] = chat_id
+                        msg["chat_topic"] = chat.get("topic", "")
+                        mentions.append(msg)
+
+                        if len(mentions) >= limit:
+                            break
+            except Exception as e:
+                logger.warning(f"Failed to get messages from chat: {e}")
+                continue
+
+            if len(mentions) >= limit:
+                break
+
+        return mentions
+
+    # ==================== FILES EXTENSIONS ====================
+
+    async def get_shared_with_me(self, limit: int = 10) -> list[dict]:
+        """Get files shared with the user."""
+        params = {
+            "$top": limit,
+        }
+
+        result = await self._request("GET", "/me/drive/sharedWithMe", params=params)
+
+        files = []
+        for item in result.get("value", []):
+            shared_by = item.get("remoteItem", {}).get("shared", {}).get("sharedBy", {})
+            files.append({
+                "id": item.get("id", ""),
+                "name": item.get("name", ""),
+                "web_url": item.get("webUrl", ""),
+                "size": item.get("size", 0),
+                "shared_by": shared_by.get("user", {}).get("displayName", ""),
+                "shared_by_email": shared_by.get("user", {}).get("email", ""),
+                "modified": item.get("lastModifiedDateTime", ""),
+            })
+
+        return files
+
+    async def list_folder(self, folder_path: str = "root") -> list[dict]:
+        """List contents of a OneDrive folder."""
+        if folder_path == "root":
+            endpoint = "/me/drive/root/children"
+        else:
+            endpoint = f"/me/drive/root:/{folder_path}:/children"
+
+        params = {
+            "$select": "id,name,size,lastModifiedDateTime,folder,file,webUrl",
+        }
+
+        result = await self._request("GET", endpoint, params=params)
+
+        items = []
+        for item in result.get("value", []):
+            items.append({
+                "id": item.get("id", ""),
+                "name": item.get("name", ""),
+                "is_folder": "folder" in item,
+                "size": item.get("size", 0),
+                "modified": item.get("lastModifiedDateTime", ""),
+                "web_url": item.get("webUrl", ""),
+                "mime_type": item.get("file", {}).get("mimeType", "") if "file" in item else None,
+            })
+
+        return items
+
+    async def get_file_info(self, file_id: str, drive_id: str | None = None) -> dict:
+        """Get file metadata without downloading."""
+        if drive_id:
+            endpoint = f"/drives/{drive_id}/items/{file_id}"
+        else:
+            endpoint = f"/me/drive/items/{file_id}"
+
+        result = await self._request("GET", endpoint)
+
+        return {
+            "id": result.get("id", ""),
+            "name": result.get("name", ""),
+            "size": result.get("size", 0),
+            "created": result.get("createdDateTime", ""),
+            "modified": result.get("lastModifiedDateTime", ""),
+            "web_url": result.get("webUrl", ""),
+            "mime_type": result.get("file", {}).get("mimeType", ""),
+            "created_by": result.get("createdBy", {}).get("user", {}).get("displayName", ""),
+            "modified_by": result.get("lastModifiedBy", {}).get("user", {}).get("displayName", ""),
+            "parent_path": result.get("parentReference", {}).get("path", ""),
+        }
+
+    async def search_sharepoint_site(self, site_id: str, query: str, limit: int = 10) -> list[dict]:
+        """Search files in a specific SharePoint site."""
+        search_body = {
+            "requests": [
+                {
+                    "entityTypes": ["driveItem"],
+                    "query": {"queryString": query},
+                    "from": 0,
+                    "size": limit,
+                    "sharePointOneDriveOptions": {
+                        "includeHiddenContent": False,
+                    },
+                }
+            ]
+        }
+
+        result = await self._request("POST", "/search/query", json_data=search_body)
+
+        files = []
+        for response in result.get("value", []):
+            for hit in response.get("hitsContainers", [{}])[0].get("hits", []):
+                resource = hit.get("resource", {})
+                parent_ref = resource.get("parentReference", {})
+
+                # Filter by site if site_id is provided
+                if site_id and site_id not in parent_ref.get("siteId", ""):
+                    continue
+
+                files.append({
+                    "id": resource.get("id", ""),
+                    "drive_id": parent_ref.get("driveId", ""),
+                    "name": resource.get("name", ""),
+                    "web_url": resource.get("webUrl", ""),
+                    "size": resource.get("size", 0),
+                    "modified": resource.get("lastModifiedDateTime", ""),
+                    "site_id": parent_ref.get("siteId", ""),
+                })
+
+        return files

@@ -21,6 +21,7 @@ SCOPES = [
     "Calendars.Read",
     "Chat.Read",
     "Files.Read.All",
+    "Sites.Read.All",  # For SharePoint and Copilot Retrieval API
     "OnlineMeetings.Read",
     "OnlineMeetingTranscript.Read.All",  # For meeting transcripts
     "OnlineMeetingAiInsight.Read.All",  # For Copilot AI insights (requires Copilot license)

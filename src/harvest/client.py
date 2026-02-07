@@ -438,6 +438,59 @@ class HarvestClient:
             "total_billable_hours": sum(row.get("billable_hours", 0) for row in result.get("results", [])),
         }
 
+    async def get_running_timers(self) -> list[dict]:
+        """Find any currently running timers."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = await self.get_time_entries(from_date=today, to_date=today)
+
+        running = [e for e in entries if e.get("is_running", False)]
+        return running
+
+    async def get_client_report(self, from_date: str, to_date: str) -> dict:
+        """
+        Get time by client.
+
+        Args:
+            from_date: Start date (YYYY-MM-DD format)
+            to_date: End date (YYYY-MM-DD format)
+        """
+        params = {
+            "from": from_date,
+            "to": to_date,
+        }
+
+        result = await self._request("GET", "/reports/time/clients", params=params)
+
+        return {
+            "from_date": from_date,
+            "to_date": to_date,
+            "results": [
+                {
+                    "client_id": row.get("client_id"),
+                    "client_name": row.get("client_name", ""),
+                    "total_hours": row.get("total_hours", 0),
+                    "billable_hours": row.get("billable_hours", 0),
+                    "billable_amount": row.get("billable_amount", 0),
+                }
+                for row in result.get("results", [])
+            ],
+            "total_hours": sum(row.get("total_hours", 0) for row in result.get("results", [])),
+            "total_billable_hours": sum(row.get("billable_hours", 0) for row in result.get("results", [])),
+        }
+
+    async def get_my_user_id(self) -> int | None:
+        """Get the current authenticated user's ID."""
+        result = await self._request("GET", "/users/me")
+        return result.get("id")
+
+    async def get_my_time_entries(self, days: int = 7) -> list[dict]:
+        """Get the current user's recent time entries."""
+        user_id = await self.get_my_user_id()
+        if not user_id:
+            return []
+
+        return await self.get_time_entries_for_user(user_id, days)
+
     # ==================== UTILITY ====================
 
     async def test_connection(self) -> dict:

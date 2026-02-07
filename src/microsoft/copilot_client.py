@@ -430,7 +430,8 @@ class MeetingInsightsClient:
             logger.error("Could not get user ID for AI insights")
             return []
 
-        url = f"{GRAPH_BETA_URL}/copilot/users/{user_id}/onlineMeetings/{meeting_id}/aiInsights"
+        # AI Insights API is now GA in v1.0 (December 2025)
+        url = f"{GRAPH_BASE_URL}/copilot/users/{user_id}/onlineMeetings/{meeting_id}/aiInsights"
         logger.info(f"Fetching AI insights from: {url}")
 
         try:
@@ -668,6 +669,223 @@ class MeetingInsightsClient:
             result["error"] = f"Failed to fetch transcripts: {str(e)}"
 
         return result
+
+    # ==================== MEETING-SPECIFIC HELPERS ====================
+
+    async def get_meeting_action_items(self, meeting_id: str) -> dict:
+        """Get just the action items from a meeting (simpler than full summary)."""
+        insights = await self.get_meeting_ai_insights(meeting_id)
+
+        action_items = []
+        for insight in insights:
+            if "action_items" in insight:
+                action_items.extend(insight["action_items"])
+
+        return {
+            "meeting_id": meeting_id,
+            "action_items": action_items,
+            "count": len(action_items),
+            "has_insights": len(insights) > 0,
+        }
+
+    async def get_meeting_notes_only(self, meeting_id: str) -> dict:
+        """Get just the meeting notes without transcript."""
+        insights = await self.get_meeting_ai_insights(meeting_id)
+
+        meeting_notes = []
+        for insight in insights:
+            if "meeting_notes" in insight:
+                meeting_notes.extend(insight["meeting_notes"])
+
+        return {
+            "meeting_id": meeting_id,
+            "meeting_notes": meeting_notes,
+            "count": len(meeting_notes),
+            "has_insights": len(insights) > 0,
+        }
+
+    async def get_meeting_attendance(self, meeting_id: str) -> dict:
+        """Get attendance report for a meeting (must be meeting organizer)."""
+        user_id = await self.get_user_id()
+        if not user_id:
+            return {"error": "Could not get user ID"}
+
+        url = f"{GRAPH_BASE_URL}/users/{user_id}/onlineMeetings/{meeting_id}/attendanceReports"
+
+        try:
+            result = await self._request("GET", url)
+            reports = result.get("value", [])
+
+            if not reports:
+                return {
+                    "meeting_id": meeting_id,
+                    "has_attendance": False,
+                    "note": "No attendance report available. You must be the meeting organizer.",
+                }
+
+            # Get the most recent attendance report
+            report = reports[0]
+            report_id = report.get("id", "")
+
+            # Get attendance records
+            records_url = f"{url}/{report_id}/attendanceRecords"
+            records_result = await self._request("GET", records_url)
+
+            attendees = []
+            for record in records_result.get("value", []):
+                attendees.append({
+                    "email": record.get("emailAddress", ""),
+                    "display_name": record.get("identity", {}).get("displayName", ""),
+                    "total_duration_seconds": record.get("totalAttendanceInSeconds", 0),
+                    "role": record.get("role", ""),
+                })
+
+            return {
+                "meeting_id": meeting_id,
+                "has_attendance": True,
+                "total_attendees": len(attendees),
+                "meeting_start": report.get("meetingStartDateTime", ""),
+                "meeting_end": report.get("meetingEndDateTime", ""),
+                "attendees": attendees,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get meeting attendance: {e}")
+            return {"error": str(e), "meeting_id": meeting_id}
+
+    async def get_meeting_recording(self, meeting_id: str) -> dict:
+        """Check if meeting has recording available."""
+        user_id = await self.get_user_id()
+        if not user_id:
+            return {"error": "Could not get user ID"}
+
+        url = f"{GRAPH_BASE_URL}/users/{user_id}/onlineMeetings/{meeting_id}/recordings"
+
+        try:
+            result = await self._request("GET", url)
+            recordings = result.get("value", [])
+
+            if not recordings:
+                return {
+                    "meeting_id": meeting_id,
+                    "has_recording": False,
+                    "note": "No recording available for this meeting.",
+                }
+
+            recording = recordings[0]
+            return {
+                "meeting_id": meeting_id,
+                "has_recording": True,
+                "recording_id": recording.get("id", ""),
+                "created": recording.get("createdDateTime", ""),
+                "content_url": recording.get("recordingContentUrl", ""),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get meeting recording: {e}")
+            return {"error": str(e), "meeting_id": meeting_id}
+
+    # ==================== COPILOT RETRIEVAL API ====================
+    # Docs: https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/retrieval/copilotroot-retrieval
+
+    async def copilot_search(self, query: str, max_results: int = 10) -> dict:
+        """
+        Semantic search across M365 using Copilot's index.
+
+        Requires: Files.Read.All and Sites.Read.All permissions.
+        Note: This API is in public preview (beta endpoint).
+        """
+        url = f"{GRAPH_BETA_URL}/copilot/retrieval"
+
+        body = {
+            "queryString": query,
+            "top": min(max_results, 10),  # API max is 10
+        }
+
+        try:
+            result = await self._request("POST", url, json_data=body)
+
+            documents = []
+            for doc in result.get("value", []):
+                documents.append({
+                    "id": doc.get("id", ""),
+                    "title": doc.get("title", ""),
+                    "web_url": doc.get("webUrl", ""),
+                    "snippet": doc.get("snippet", ""),
+                    "source_type": doc.get("sourceType", ""),
+                    "relevance_score": doc.get("relevanceScore", 0),
+                    "last_modified": doc.get("lastModifiedDateTime", ""),
+                })
+
+            return {
+                "query": query,
+                "documents": documents,
+                "count": len(documents),
+            }
+
+        except PermissionError as e:
+            return {
+                "error": "Insufficient permissions. Copilot Retrieval API requires Files.Read.All and Sites.Read.All.",
+                "details": str(e),
+            }
+        except Exception as e:
+            logger.error(f"Copilot search failed: {e}")
+            return {"error": str(e), "query": query}
+
+    async def copilot_search_sharepoint(self, query: str, site_url: str | None = None, max_results: int = 10) -> dict:
+        """
+        Semantic search specifically in SharePoint sites using Copilot's index.
+
+        Args:
+            query: The search query
+            site_url: Optional SharePoint site URL to limit search to
+            max_results: Maximum number of results (max 10)
+        """
+        url = f"{GRAPH_BETA_URL}/copilot/retrieval"
+
+        body = {
+            "queryString": query,
+            "top": min(max_results, 10),
+            "sources": {
+                "sharePoint": {
+                    "includePersonalSites": False,
+                }
+            }
+        }
+
+        if site_url:
+            body["sources"]["sharePoint"]["siteUrls"] = [site_url]
+
+        try:
+            result = await self._request("POST", url, json_data=body)
+
+            documents = []
+            for doc in result.get("value", []):
+                documents.append({
+                    "id": doc.get("id", ""),
+                    "title": doc.get("title", ""),
+                    "web_url": doc.get("webUrl", ""),
+                    "snippet": doc.get("snippet", ""),
+                    "site_url": doc.get("siteUrl", ""),
+                    "relevance_score": doc.get("relevanceScore", 0),
+                    "last_modified": doc.get("lastModifiedDateTime", ""),
+                })
+
+            return {
+                "query": query,
+                "site_filter": site_url,
+                "documents": documents,
+                "count": len(documents),
+            }
+
+        except PermissionError as e:
+            return {
+                "error": "Insufficient permissions. Requires Files.Read.All and Sites.Read.All.",
+                "details": str(e),
+            }
+        except Exception as e:
+            logger.error(f"Copilot SharePoint search failed: {e}")
+            return {"error": str(e), "query": query}
 
     async def find_transcript_for_calendar_meeting(self, event_id: str, join_url: str) -> dict:
         """

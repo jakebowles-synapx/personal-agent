@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "personal-tools": {
+      "command": "python",
+      "args": ["/Users/jake/proj/personal-agent/mcp_server.py"]
+    }
+  }
+}

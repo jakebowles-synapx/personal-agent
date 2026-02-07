@@ -92,13 +92,17 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_emails",
-        "description": "Get recent emails from the user's inbox. Use this when the user asks about their emails or messages.",
+        "description": "Get recent emails from the user's inbox. Use this when the user asks about their emails or messages. Supports pagination with skip parameter for bulk operations.",
         "parameters": {
             "type": "object",
             "properties": {
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of emails to return (default: 10, max: 25)",
+                    "description": "Maximum number of emails to return (default: 10, max: 50)",
+                },
+                "skip": {
+                    "type": "integer",
+                    "description": "Number of emails to skip for pagination (default: 0). Use to get the next batch of emails.",
                 },
                 "search": {
                     "type": "string",
@@ -126,13 +130,17 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_teams_chats",
-        "description": "Get recent Teams chat conversations. Use this when the user asks about their Teams messages or chats.",
+        "description": "Get recent Teams chat conversations. Use this when the user asks about their Teams messages or chats. Supports pagination with skip parameter.",
         "parameters": {
             "type": "object",
             "properties": {
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of chats to return (default: 10)",
+                    "description": "Maximum number of chats to return (default: 10, max: 50)",
+                },
+                "skip": {
+                    "type": "integer",
+                    "description": "Number of chats to skip for pagination (default: 0)",
                 },
             },
             "required": [],
@@ -141,7 +149,7 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_chat_messages",
-        "description": "Get messages from a specific Teams chat. Use this after get_teams_chats to read messages from a conversation.",
+        "description": "Get messages from a specific Teams chat. Use this after get_teams_chats to read messages from a conversation. Supports pagination.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -151,7 +159,11 @@ TOOLS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of messages to return (default: 20)",
+                    "description": "Maximum number of messages to return (default: 20, max: 50)",
+                },
+                "skip": {
+                    "type": "integer",
+                    "description": "Number of messages to skip for pagination (default: 0)",
                 },
             },
             "required": ["chat_id"],
@@ -345,6 +357,379 @@ TOOLS = [
     },
 ]
 
+# Extension tools - optional, can be loaded for advanced use cases
+# Not included by default to avoid overwhelming the model with too many tools
+EXTENSION_TOOLS = [
+    # ==================== USER PROFILE ====================
+    {
+        "type": "function",
+        "name": "get_my_profile",
+        "description": "Get the user's profile information including name, email, job title, department, and office location. Use this when the user asks 'who am I?', 'what's my email?', or wants to see their profile.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    # ==================== EMAIL EXTENSIONS ====================
+    {
+        "type": "function",
+        "name": "get_unread_emails",
+        "description": "Get unread emails only. Use this when the user asks 'what emails do I need to read?', 'any unread emails?', or 'show me new emails'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of unread emails to return (default: 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_unread_email_count",
+        "description": "Get a quick count of unread emails. Use this when the user asks 'how many unread emails?', 'inbox count?', or just wants a quick status.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_sent_emails",
+        "description": "Get recently sent emails. Use this when the user asks 'what emails did I send?', 'show sent items', or wants to see their outgoing messages.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of sent emails to return (default: 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_flagged_emails",
+        "description": "Get flagged/starred emails. Use this when the user asks 'show flagged emails', 'important emails', or 'emails I marked'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of flagged emails to return (default: 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    # ==================== CALENDAR EXTENSIONS ====================
+    {
+        "type": "function",
+        "name": "get_next_event",
+        "description": "Get just the next upcoming calendar event. Use this when the user asks 'what's next?', 'when is my next meeting?', or 'what do I have coming up?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "find_free_time",
+        "description": "Find free time slots in the calendar. Use this when the user asks 'when am I free?', 'find time for a meeting', or 'show available slots'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "duration_minutes": {
+                    "type": "integer",
+                    "description": "Minimum duration needed in minutes (default: 30)",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Number of days to look ahead (default: 7)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_events_with_person",
+        "description": "Get calendar events with a specific attendee. Use this when the user asks 'meetings with [person]', 'when did I meet with [person]?', or 'events including [person]'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "string",
+                    "description": "Name or email of the person to find events with",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Number of days to look back and forward (default: 30)",
+                },
+            },
+            "required": ["person"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_week_summary",
+        "description": "Get a summary of the current week's meetings including count and total hours. Use this when the user asks 'how busy is my week?', 'meeting load this week?', or 'week summary'.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    # ==================== TEAMS EXTENSIONS ====================
+    {
+        "type": "function",
+        "name": "search_teams_messages",
+        "description": "Search Teams messages by keyword. Use this when the user asks 'find messages about X', 'search Teams for X', or 'who mentioned X?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The keyword or phrase to search for in Teams messages",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of messages to return (default: 20)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_chat_with_person",
+        "description": "Get the 1:1 chat thread with a specific person. Use this when the user asks 'show chat with [person]', 'DM with [person]', or 'direct messages from [person]'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "string",
+                    "description": "Name or email of the person",
+                },
+            },
+            "required": ["person"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_group_chats",
+        "description": "Get group chats only (not 1:1 chats). Use this when the user asks 'show group chats', 'team conversations', or wants to see multi-person chats.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of group chats to return (default: 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_recent_mentions",
+        "description": "Find messages where the user is mentioned. Use this when the user asks 'who mentioned me?', 'any @mentions?', or 'messages where I was tagged'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of mentions to return (default: 20)",
+                },
+            },
+            "required": [],
+        },
+    },
+    # ==================== FILES EXTENSIONS ====================
+    {
+        "type": "function",
+        "name": "get_shared_with_me",
+        "description": "Get files shared with the user. Use this when the user asks 'files shared with me', 'what did people share?', or 'show shared documents'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of files to return (default: 10)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_folder",
+        "description": "List contents of a OneDrive folder. Use this when the user asks 'what's in my OneDrive?', 'show folder contents', or 'list files in [folder]'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "folder_path": {
+                    "type": "string",
+                    "description": "Path to the folder (use 'root' for OneDrive root, or path like 'Documents/Projects')",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_file_info",
+        "description": "Get file metadata without downloading the file. Use this when the user asks 'info about [file]', 'file details', or 'when was [file] modified?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": "The ID of the file (from search_files or list_folder)",
+                },
+                "drive_id": {
+                    "type": "string",
+                    "description": "The drive ID (for SharePoint files)",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "search_sharepoint_site",
+        "description": "Search files in a specific SharePoint site. Use this when the user asks 'search [site] for X', or wants to find files in a specific SharePoint location.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "site_id": {
+                    "type": "string",
+                    "description": "The SharePoint site ID to search in",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query to find files",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of files to return (default: 10)",
+                },
+            },
+            "required": ["site_id", "query"],
+        },
+    },
+    # ==================== MEETING EXTENSIONS ====================
+    {
+        "type": "function",
+        "name": "get_meeting_attendance",
+        "description": "Get attendance report for a meeting (must be the meeting organizer). Use this when the user asks 'who attended [meeting]?', 'meeting attendance', or 'show meeting participants'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "The online meeting ID (from get_recent_meetings)",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_meeting_recording",
+        "description": "Check if a meeting has a recording available. Use this when the user asks 'is there a recording?', 'meeting recording', or 'video of the meeting'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "The online meeting ID (from get_recent_meetings)",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    # ==================== COPILOT AI TOOLS ====================
+    {
+        "type": "function",
+        "name": "get_meeting_action_items",
+        "description": "Get just the action items from a meeting using Copilot AI. Use this when the user asks 'action items from [meeting]', 'tasks from meeting', or 'what do I need to do after [meeting]?'. Requires Copilot license.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "The online meeting ID (from get_recent_meetings)",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_meeting_notes_only",
+        "description": "Get just the meeting notes from Copilot AI without the full transcript. Use this when the user asks 'meeting notes', 'summary of [meeting]', or 'key points from meeting'. Requires Copilot license.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "The online meeting ID (from get_recent_meetings)",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "copilot_search",
+        "description": "Semantic search across Microsoft 365 using Copilot's AI-powered index. Searches OneDrive, SharePoint, and more. Use this when the user wants intelligent document search. Requires Sites.Read.All permission.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query (can be natural language)",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default: 10, max: 10)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "copilot_search_sharepoint",
+        "description": "Semantic search specifically in SharePoint sites using Copilot's AI index. Use this for intelligent search within SharePoint. Requires Sites.Read.All permission.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query (can be natural language)",
+                },
+                "site_url": {
+                    "type": "string",
+                    "description": "Optional: SharePoint site URL to limit search to",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default: 10, max: 10)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+]
+
 # Harvest tools - only included when Harvest is configured
 HARVEST_TOOLS = [
     {
@@ -472,40 +857,62 @@ HARVEST_TOOLS = [
             "required": [],
         },
     },
-]
-
-# Knowledge tools (always available)
-KNOWLEDGE_TOOLS = [
+    # ==================== NEW HARVEST TOOLS ====================
     {
         "type": "function",
-        "name": "propose_knowledge",
-        "description": "Propose adding information to the knowledge base. Use this when you learn important facts about the user's organization, team, projects, clients, or processes that should be remembered permanently. The user will review and approve before it's saved. Categories: 'strategy' (goals, OKRs), 'team' (people, roles), 'processes' (workflows), 'clients' (client info), 'projects' (project context).",
+        "name": "harvest_today_tracking",
+        "description": "Get time entries being tracked today. Use this when the user asks 'what's being tracked today?', 'today's time entries', or 'what did people work on today?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_my_time",
+        "description": "Get the current user's recent time entries. Use this when the user asks 'my time entries', 'what have I been working on?', or 'my hours this week'.",
         "parameters": {
             "type": "object",
             "properties": {
-                "category": {
-                    "type": "string",
-                    "enum": ["strategy", "team", "processes", "clients", "projects"],
-                    "description": "Category for the knowledge item",
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Short title for the knowledge (e.g., 'CTO Name', 'Project Alpha Budget')",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The knowledge content to store",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation of why this should be saved to knowledge",
+                "days": {
+                    "type": "integer",
+                    "description": "Number of days to look back (default: 7)",
                 },
             },
-            "required": ["category", "title", "content"],
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_running_timers",
+        "description": "Find any currently running timers. Use this when the user asks 'any timers running?', 'is anyone tracking time right now?', or 'active time entries'.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "harvest_client_report",
+        "description": "Get time summary by client. Use this when the user asks 'time by client', 'client hours', or 'which clients are we working on?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "from_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format (default: 7 days ago)",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End date in YYYY-MM-DD format (default: today)",
+                },
+            },
+            "required": [],
         },
     },
 ]
-
 
 class ToolExecutor:
     """Executes tools called by the LLM."""
@@ -531,10 +938,6 @@ class ToolExecutor:
     async def execute(self, user_id: str, tool_name: str, arguments: dict) -> dict[str, Any]:
         """Execute a tool and return the result."""
         logger.info(f"Executing tool {tool_name} for user {user_id} with args: {arguments}")
-
-        # Handle knowledge tools (no auth required)
-        if tool_name == "propose_knowledge":
-            return await self._propose_knowledge(arguments)
 
         # Handle Harvest tools
         if self._is_harvest_tool(tool_name):
@@ -591,10 +994,11 @@ class ToolExecutor:
                 return {"meetings": result, "count": len(result), "date": date_str}
 
             elif tool_name == "get_emails":
-                limit = min(arguments.get("limit", 10), 25)
+                limit = min(arguments.get("limit", 10), 50)
+                skip = arguments.get("skip", 0)
                 search = arguments.get("search")
-                result = await graph.get_emails(limit=limit, search=search)
-                return {"emails": result, "count": len(result)}
+                result = await graph.get_emails(limit=limit, skip=skip, search=search)
+                return {"emails": result, "count": len(result), "skip": skip, "has_more": len(result) == limit}
 
             elif tool_name == "get_email_details":
                 email_id = arguments.get("email_id")
@@ -604,17 +1008,19 @@ class ToolExecutor:
                 return {"email": result}
 
             elif tool_name == "get_teams_chats":
-                limit = min(arguments.get("limit", 10), 25)
-                result = await graph.get_teams_chats(limit=limit)
-                return {"chats": result, "count": len(result)}
+                limit = min(arguments.get("limit", 10), 50)
+                skip = arguments.get("skip", 0)
+                result = await graph.get_teams_chats(limit=limit, skip=skip)
+                return {"chats": result, "count": len(result), "skip": skip, "has_more": len(result) == limit}
 
             elif tool_name == "get_chat_messages":
                 chat_id = arguments.get("chat_id")
                 if not chat_id:
                     return {"error": "chat_id is required"}
                 limit = min(arguments.get("limit", 20), 50)
+                skip = arguments.get("skip", 0)
                 result = await graph.get_chat_messages(chat_id=chat_id, limit=limit)
-                return {"messages": result, "count": len(result)}
+                return {"messages": result, "count": len(result), "skip": skip, "has_more": len(result) == limit}
 
             elif tool_name == "search_files":
                 query = arguments.get("query")
@@ -765,6 +1171,169 @@ class ToolExecutor:
                     "teams_count": len(teams_messages),
                 }
 
+            # ==================== NEW TOOLS ====================
+
+            # User Profile
+            elif tool_name == "get_my_profile":
+                result = await graph.get_me()
+                return {"profile": result}
+
+            # Email Extensions
+            elif tool_name == "get_unread_emails":
+                limit = min(arguments.get("limit", 10), 50)
+                result = await graph.get_unread_emails(limit=limit)
+                return {"emails": result, "count": len(result)}
+
+            elif tool_name == "get_unread_email_count":
+                result = await graph.get_unread_email_count()
+                return result
+
+            elif tool_name == "get_sent_emails":
+                limit = min(arguments.get("limit", 10), 50)
+                result = await graph.get_sent_emails(limit=limit)
+                return {"emails": result, "count": len(result)}
+
+            elif tool_name == "get_flagged_emails":
+                limit = min(arguments.get("limit", 10), 50)
+                result = await graph.get_flagged_emails(limit=limit)
+                return {"emails": result, "count": len(result)}
+
+            # Calendar Extensions
+            elif tool_name == "get_next_event":
+                result = await graph.get_next_event()
+                if result:
+                    return {"event": result}
+                return {"message": "No upcoming events found in the next 7 days"}
+
+            elif tool_name == "find_free_time":
+                duration = arguments.get("duration_minutes", 30)
+                days = min(arguments.get("days", 7), 30)
+                result = await graph.find_free_time(duration_minutes=duration, days=days)
+                return {"free_slots": result, "count": len(result)}
+
+            elif tool_name == "get_events_with_person":
+                person = arguments.get("person")
+                if not person:
+                    return {"error": "person is required"}
+                days = min(arguments.get("days", 30), 60)
+                result = await graph.get_events_with_person(person=person, days=days)
+                return {"events": result, "count": len(result), "person": person}
+
+            elif tool_name == "get_week_summary":
+                result = await graph.get_week_summary()
+                return result
+
+            # Teams Extensions
+            elif tool_name == "search_teams_messages":
+                query = arguments.get("query")
+                if not query:
+                    return {"error": "query is required"}
+                limit = min(arguments.get("limit", 20), 50)
+                result = await graph.search_teams_messages(query=query, limit=limit)
+                return {"messages": result, "count": len(result), "query": query}
+
+            elif tool_name == "get_chat_with_person":
+                person = arguments.get("person")
+                if not person:
+                    return {"error": "person is required"}
+                result = await graph.get_chat_with_person(person=person)
+                if result:
+                    return result
+                return {"message": f"No 1:1 chat found with '{person}'"}
+
+            elif tool_name == "get_group_chats":
+                limit = min(arguments.get("limit", 10), 50)
+                result = await graph.get_group_chats(limit=limit)
+                return {"chats": result, "count": len(result)}
+
+            elif tool_name == "get_recent_mentions":
+                limit = min(arguments.get("limit", 20), 50)
+                result = await graph.get_recent_mentions(limit=limit)
+                return {"mentions": result, "count": len(result)}
+
+            # Files Extensions
+            elif tool_name == "get_shared_with_me":
+                limit = min(arguments.get("limit", 10), 50)
+                result = await graph.get_shared_with_me(limit=limit)
+                return {"files": result, "count": len(result)}
+
+            elif tool_name == "list_folder":
+                folder_path = arguments.get("folder_path", "root")
+                result = await graph.list_folder(folder_path=folder_path)
+                return {"items": result, "count": len(result), "folder": folder_path}
+
+            elif tool_name == "get_file_info":
+                file_id = arguments.get("file_id")
+                if not file_id:
+                    return {"error": "file_id is required"}
+                drive_id = arguments.get("drive_id")
+                result = await graph.get_file_info(file_id=file_id, drive_id=drive_id)
+                return {"file": result}
+
+            elif tool_name == "search_sharepoint_site":
+                site_id = arguments.get("site_id")
+                query = arguments.get("query")
+                if not site_id or not query:
+                    return {"error": "site_id and query are required"}
+                limit = min(arguments.get("limit", 10), 25)
+                result = await graph.search_sharepoint_site(site_id=site_id, query=query, limit=limit)
+                return {"files": result, "count": len(result)}
+
+            # Meeting Extensions
+            elif tool_name == "get_meeting_attendance":
+                meeting_id = arguments.get("meeting_id")
+                if not meeting_id:
+                    return {"error": "meeting_id is required"}
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.get_meeting_attendance(meeting_id=meeting_id)
+                return result
+
+            elif tool_name == "get_meeting_recording":
+                meeting_id = arguments.get("meeting_id")
+                if not meeting_id:
+                    return {"error": "meeting_id is required"}
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.get_meeting_recording(meeting_id=meeting_id)
+                return result
+
+            # Copilot AI Tools
+            elif tool_name == "get_meeting_action_items":
+                meeting_id = arguments.get("meeting_id")
+                if not meeting_id:
+                    return {"error": "meeting_id is required"}
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.get_meeting_action_items(meeting_id=meeting_id)
+                return result
+
+            elif tool_name == "get_meeting_notes_only":
+                meeting_id = arguments.get("meeting_id")
+                if not meeting_id:
+                    return {"error": "meeting_id is required"}
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.get_meeting_notes_only(meeting_id=meeting_id)
+                return result
+
+            elif tool_name == "copilot_search":
+                query = arguments.get("query")
+                if not query:
+                    return {"error": "query is required"}
+                max_results = min(arguments.get("max_results", 10), 10)
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.copilot_search(query=query, max_results=max_results)
+                return result
+
+            elif tool_name == "copilot_search_sharepoint":
+                query = arguments.get("query")
+                if not query:
+                    return {"error": "query is required"}
+                site_url = arguments.get("site_url")
+                max_results = min(arguments.get("max_results", 10), 10)
+                meetings_client = MeetingInsightsClient(access_token)
+                result = await meetings_client.copilot_search_sharepoint(
+                    query=query, site_url=site_url, max_results=max_results
+                )
+                return result
+
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
 
@@ -880,6 +1449,48 @@ class ToolExecutor:
                 result = await harvest.get_project_time_report(from_date=from_date, to_date=to_date)
                 return result
 
+            # New Harvest tools
+            elif tool_name == "harvest_today_tracking":
+                result = await harvest.get_today_time_entries()
+                total_hours = sum(entry["hours"] for entry in result)
+                return {
+                    "time_entries": result,
+                    "count": len(result),
+                    "total_hours": round(total_hours, 2),
+                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                }
+
+            elif tool_name == "harvest_my_time":
+                days = min(arguments.get("days", 7), 30)
+                result = await harvest.get_my_time_entries(days=days)
+                total_hours = sum(entry["hours"] for entry in result)
+                return {
+                    "time_entries": result,
+                    "count": len(result),
+                    "total_hours": round(total_hours, 2),
+                    "days": days,
+                }
+
+            elif tool_name == "harvest_running_timers":
+                result = await harvest.get_running_timers()
+                return {
+                    "running_timers": result,
+                    "count": len(result),
+                }
+
+            elif tool_name == "harvest_client_report":
+                from_date = arguments.get("from_date")
+                to_date = arguments.get("to_date")
+
+                # Default to last 7 days if no dates provided
+                if not to_date:
+                    to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if not from_date:
+                    from_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
+                result = await harvest.get_client_report(from_date=from_date, to_date=to_date)
+                return result
+
             else:
                 return {"error": f"Unknown Harvest tool: {tool_name}"}
 
@@ -890,56 +1501,3 @@ class ToolExecutor:
             logger.error(f"Error executing Harvest tool {tool_name}: {e}", exc_info=True)
             return {"error": f"Failed to execute {tool_name}: {str(e)}"}
 
-    async def _propose_knowledge(self, arguments: dict) -> dict[str, Any]:
-        """Propose adding knowledge - creates a recommendation for user approval."""
-        from src.db import RecommendationsDB
-
-        category = arguments.get("category")
-        title = arguments.get("title")
-        content = arguments.get("content")
-        reason = arguments.get("reason", "")
-
-        valid_categories = ["strategy", "team", "processes", "clients", "projects"]
-        if category not in valid_categories:
-            return {"error": f"Invalid category. Must be one of: {valid_categories}"}
-
-        if not title or not content:
-            return {"error": "Both title and content are required"}
-
-        # Create a recommendation for user approval
-        rec_title = f"Knowledge Proposal: {title}"
-        rec_content = f"""**Proposed Knowledge Item**
-
-**Category:** {category}
-**Title:** {title}
-
-**Content:**
-{content}
-
-**Reason for adding:**
-{reason if reason else "Not specified"}
-
----
-*To approve this knowledge, click "Approve" in the Recommendations page.*"""
-
-        rec_id = RecommendationsDB.create(
-            agent_name="chat",
-            title=rec_title,
-            content=rec_content,
-            priority="normal",
-            metadata={
-                "type": "knowledge_proposal",
-                "proposed_category": category,
-                "proposed_title": title,
-                "proposed_content": content,
-                "reason": reason,
-            },
-        )
-
-        logger.info(f"Created knowledge proposal recommendation {rec_id}: {title}")
-
-        return {
-            "success": True,
-            "message": f"Knowledge proposal created. The user will be asked to approve adding '{title}' to the {category} category.",
-            "recommendation_id": rec_id,
-        }

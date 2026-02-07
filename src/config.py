@@ -12,36 +12,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Azure OpenAI
-    azure_openai_endpoint: str
-    azure_openai_api_key: str
-    azure_openai_deployment: str = "gpt-4"
-    azure_openai_embedding_deployment: str = "text-embedding-ada-002"
-
     # Azure AD (Microsoft Graph)
     azure_client_id: str = ""
     azure_client_secret: str = ""
     azure_tenant_id: str = ""
 
-    # Harvest
+    # Harvest (optional)
     harvest_account_id: str = ""
     harvest_access_token: str = ""
-
-    # Memory
-    qdrant_host: str = "localhost"
-    qdrant_port: int = 6333
 
     # App
     app_secret_key: str
     app_base_url: str = "http://localhost:8000"  # Used for OAuth redirect
-    data_dir: str = "."  # Directory for SQLite databases
-
-    # Scheduler - cron format schedules
-    scheduler_enabled: bool = True
-    briefing_schedule: str = "0 7 * * *"  # Daily at 7am
-    action_item_schedule: str = "0 */2 * * *"  # Every 2 hours
-    memory_schedule: str = "0 * * * *"  # Hourly
-    anomaly_schedule: str = "0 */4 * * *"  # Every 4 hours
 
 
 settings = Settings()
