@@ -10,8 +10,33 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _is_html_content(content: bytes) -> bool:
+    """Check if content appears to be HTML rather than binary."""
+    try:
+        # Check first 1000 bytes for HTML signatures
+        sample = content[:1000].lower()
+        html_signatures = [b'<!doctype html', b'<html', b'<head', b'<body', b'<!doctype', b'<script']
+        return any(sig in sample for sig in html_signatures)
+    except Exception:
+        return False
+
+
+def _is_ole_format(content: bytes) -> bool:
+    """Check if content is in OLE Compound Document format (legacy .doc/.xls/.ppt or password-protected Office files)."""
+    # OLE magic bytes: D0 CF 11 E0 A1 B1 1A E1
+    return content[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
+
+
 def _extract_docx_text(content: bytes) -> str:
     """Extract text from a .docx file."""
+    # Check if we got HTML instead of binary content
+    if _is_html_content(content):
+        raise ValueError("Received HTML instead of document content - possible authentication or permission issue")
+
+    # Check if this is in OLE format (password-protected or legacy .doc)
+    if _is_ole_format(content):
+        raise ValueError("File is password-protected or in legacy .doc format. Password-protected documents cannot be read programmatically.")
+
     from docx import Document
     doc = Document(io.BytesIO(content))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -462,7 +487,7 @@ class GraphClient:
 
         logger.info(f"get_file_content: base_path={base_path}")
 
-        # First get file metadata
+        # First get file metadata (don't use $select to ensure @microsoft.graph.downloadUrl is included)
         metadata = await self._request("GET", base_path)
 
         file_name = metadata.get("name", "")
@@ -485,14 +510,20 @@ class GraphClient:
         text_extensions = {"txt", "md", "csv", "json", "xml", "html", "css", "js", "ts", "py", "yaml", "yml", "log", "ini", "cfg"}
         office_extensions = {"docx", "xlsx", "pptx", "doc", "xls", "ppt"}
 
-        content_url = f"{GRAPH_BASE_URL}{base_path}/content"
+        # Prefer the direct download URL from metadata if available (more reliable for SharePoint)
+        download_url = metadata.get("@microsoft.graph.downloadUrl")
+        content_url = download_url if download_url else f"{GRAPH_BASE_URL}{base_path}/content"
+        logger.debug(f"get_file_content: using {'direct download URL' if download_url else 'content endpoint'}")
 
         async with httpx.AsyncClient() as client:
+            # For direct download URLs, don't send auth header (it's pre-authenticated and signed)
+            request_headers = {} if download_url else self.headers
+
             if extension in text_extensions:
                 # Download raw content for text files
                 response = await client.get(
                     content_url,
-                    headers=self.headers,
+                    headers=request_headers,
                     follow_redirects=True,
                     timeout=60.0,
                 )
@@ -518,18 +549,48 @@ class GraphClient:
                 logger.info(f"get_file_content: downloading {extension} file from {content_url}")
                 response = await client.get(
                     content_url,
-                    headers=self.headers,
+                    headers=request_headers,
                     follow_redirects=True,
                     timeout=60.0,
                 )
 
-                logger.info(f"get_file_content: download response status={response.status_code}")
+                logger.debug(f"get_file_content: download response status={response.status_code}, content-type={response.headers.get('content-type', 'unknown')}")
                 if response.status_code != 200:
                     logger.error(f"get_file_content: download failed with {response.status_code}: {response.text[:500]}")
                     return {"error": f"Failed to download file: {response.status_code}", "name": file_name}
 
                 file_bytes = response.content
-                logger.info(f"get_file_content: downloaded {len(file_bytes)} bytes, extracting text...")
+                logger.debug(f"get_file_content: downloaded {len(file_bytes)} bytes")
+
+                # Check if we received HTML instead of binary content (auth redirect, error page, etc.)
+                if _is_html_content(file_bytes):
+                    logger.error(f"get_file_content: received HTML instead of binary content")
+                    return {
+                        "error": "Received HTML instead of document content. This usually indicates an authentication or permission issue with SharePoint.",
+                        "name": file_name,
+                        "web_url": metadata.get("webUrl", ""),
+                        "hint": "Try opening the file directly in SharePoint to verify access.",
+                    }
+
+                # Check for valid ZIP signature (docx/xlsx/pptx are ZIP files starting with PK)
+                if extension in {"docx", "xlsx", "pptx"} and not file_bytes.startswith(b'PK'):
+                    logger.error(f"get_file_content: file does not have ZIP signature, starts with: {file_bytes[:20]}")
+
+                    # Check if it's password-protected (OLE format)
+                    if _is_ole_format(file_bytes):
+                        return {
+                            "error": f"File is password-protected or in legacy Office format. Password-protected documents cannot be read programmatically.",
+                            "name": file_name,
+                            "web_url": metadata.get("webUrl", ""),
+                            "hint": "Open the file in SharePoint/Word to view contents, or request an unprotected version.",
+                        }
+
+                    return {
+                        "error": f"Downloaded content is not a valid {extension} file. The file may be corrupted or inaccessible.",
+                        "name": file_name,
+                        "web_url": metadata.get("webUrl", ""),
+                        "hint": "Try opening the file directly in SharePoint to verify it's not corrupted.",
+                    }
 
                 try:
                     if extension == "docx":

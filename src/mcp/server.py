@@ -58,13 +58,28 @@ TOOL_DEFINITIONS = [
     # Email
     Tool(
         name="get_emails",
-        description="Get recent emails from inbox. Supports search and pagination.",
+        description="Get emails from a folder. Supports search and pagination.",
         inputSchema={
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "Max emails to return (default: 10, max: 50)"},
                 "skip": {"type": "integer", "description": "Skip N emails for pagination"},
                 "search": {"type": "string", "description": "Search query to filter emails"},
+                "folder": {
+                    "type": "string",
+                    "description": "Mail folder (default: inbox). Options: inbox, sentitems, drafts, deleteditems",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="get_sent_emails",
+        description="Get emails you have sent.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max emails to return (default: 10, max: 50)"},
+                "skip": {"type": "integer", "description": "Skip N emails for pagination"},
             },
         },
     ),
@@ -119,6 +134,16 @@ TOOL_DEFINITIONS = [
                 "skip": {"type": "integer", "description": "Skip N messages for pagination"},
             },
             "required": ["chat_id"],
+        },
+    ),
+    Tool(
+        name="get_my_teams_messages",
+        description="Get Teams messages you have sent recently.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max messages to return (default: 20)"},
+            },
         },
     ),
     # Files

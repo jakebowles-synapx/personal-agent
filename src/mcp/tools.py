@@ -94,15 +94,27 @@ class ToolHandler:
 
     # ==================== EMAIL TOOLS ====================
 
-    async def get_emails(self, limit: int = 10, skip: int = 0, search: str | None = None) -> dict[str, Any]:
-        """Get recent emails from inbox."""
+    async def get_emails(
+        self, limit: int = 10, skip: int = 0, search: str | None = None, folder: str = "inbox"
+    ) -> dict[str, Any]:
+        """Get emails from a folder (inbox, sentitems, drafts, etc.)."""
         graph = await self._get_graph_client()
         if not graph:
             return {"error": "Microsoft 365 not connected. Run 'python auth_server.py' to authenticate."}
 
         limit = min(limit, 50)
-        result = await graph.get_emails(limit=limit, skip=skip, search=search)
-        return {"emails": result, "count": len(result), "skip": skip, "has_more": len(result) == limit}
+        result = await graph.get_emails(limit=limit, skip=skip, search=search, folder=folder)
+        return {"emails": result, "count": len(result), "skip": skip, "folder": folder, "has_more": len(result) == limit}
+
+    async def get_sent_emails(self, limit: int = 10, skip: int = 0) -> dict[str, Any]:
+        """Get emails you have sent."""
+        graph = await self._get_graph_client()
+        if not graph:
+            return {"error": "Microsoft 365 not connected. Run 'python auth_server.py' to authenticate."}
+
+        limit = min(limit, 50)
+        result = await graph.get_sent_emails(limit=limit)
+        return {"emails": result, "count": len(result), "skip": skip}
 
     async def get_email_details(self, email_id: str) -> dict[str, Any]:
         """Get full content of a specific email."""
@@ -164,6 +176,44 @@ class ToolHandler:
         limit = min(limit, 50)
         result = await graph.get_chat_messages(chat_id=chat_id, limit=limit)
         return {"messages": result, "count": len(result), "skip": skip, "has_more": len(result) == limit}
+
+    async def get_my_teams_messages(self, limit: int = 20) -> dict[str, Any]:
+        """Get Teams messages you have sent recently."""
+        graph = await self._get_graph_client()
+        if not graph:
+            return {"error": "Microsoft 365 not connected. Run 'python auth_server.py' to authenticate."}
+
+        # Get current user info
+        me = await graph.get_me()
+        my_name = me.get("name", "").lower()
+
+        # Get recent chats
+        chats = await graph.get_teams_chats(limit=30)
+
+        my_messages = []
+        for chat in chats:
+            chat_id = chat["id"]
+            try:
+                messages = await graph.get_chat_messages(chat_id=chat_id, limit=30)
+                for msg in messages:
+                    from_name = msg.get("from", "").lower()
+                    if my_name and my_name in from_name:
+                        msg["chat_id"] = chat_id
+                        msg["chat_topic"] = chat.get("topic", "")
+                        msg["chat_type"] = chat.get("chat_type", "")
+                        my_messages.append(msg)
+
+                        if len(my_messages) >= limit:
+                            break
+            except Exception:
+                continue
+
+            if len(my_messages) >= limit:
+                break
+
+        # Sort by date descending
+        my_messages.sort(key=lambda x: x.get("created", ""), reverse=True)
+        return {"messages": my_messages[:limit], "count": len(my_messages[:limit])}
 
     # ==================== FILES TOOLS ====================
 

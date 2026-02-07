@@ -54,13 +54,15 @@ To auto-approve it, add to `.claude/settings.local.json`:
 - `get_past_events` - Recent past events
 
 ### Email
-- `get_emails` - Recent inbox emails (with search/pagination)
+- `get_emails` - Emails from any folder (inbox, sentitems, drafts, etc.)
+- `get_sent_emails` - Emails you have sent
 - `get_email_details` - Full email content by ID
 - `get_messages_from_person` - Emails and Teams messages from a person
 
 ### Teams
 - `get_teams_chats` - Recent chat conversations
 - `get_chat_messages` - Messages from a specific chat
+- `get_my_teams_messages` - Teams messages you have sent
 
 ### Files (OneDrive/SharePoint)
 - `search_files` - Search for documents
@@ -117,30 +119,35 @@ knowledge/
 **Cross-Linking:**
 Use relative markdown links: `[Project X](projects/project-x.md)`
 
-## Workflow Examples
+## Custom Agents
 
-### Prepare for a Meeting
-```
-1. Use get_calendar_events to see upcoming meetings
-2. Use get_messages_from_person to review recent communications with attendees
-3. Use search_files to find relevant documents
-4. Check knowledge/people/ for context on attendees
+Specialized agents for common workflows. Use with `/agent <name>` or ask naturally.
+
+| Agent | Purpose | Example Prompts |
+|-------|---------|-----------------|
+| `weekly-summary` | Summarize a full week's activities | "Summarize last week", "What happened this week?" |
+| `daily-briefing` | Morning overview of the day | "Brief me", "What's on today?" |
+| `meeting-prep` | Prepare for an upcoming meeting | "Prep me for the Midwich call", "What do I need for my 2pm?" |
+| `meeting-notes` | Extract and save meeting notes | "Document yesterday's standup", "Save notes from the client call" |
+| `person-context` | Gather context about someone | "Tell me about Joe Thompson", "What's my history with Tayo?" |
+| `project-status` | Status report for a project | "Status on Nimans Slipstream", "How's the Euroleague RFP going?" |
+| `triage` | Prioritize incoming work | "Triage my inbox", "What should I focus on?" |
+| `time-review` | Analyze time tracking data | "Review last week's time", "How's the team's utilization?" |
+
+### Using Agents
+
+```bash
+# Explicit agent invocation
+/agent weekly-summary
+/agent meeting-prep for the 3pm with Joe
+
+# Or just ask naturally - Claude will use appropriate agent
+"Give me a weekly summary"
+"Prep me for my next meeting"
+"What's the status on Project X?"
 ```
 
-### Document a Meeting
-```
-1. Use get_meeting_summary to get transcript and AI insights
-2. Create a new file in knowledge/meetings/
-3. Extract action items and decisions
-4. Update relevant project files if needed
-```
-
-### Review Team Time
-```
-1. Use harvest_team_report for utilization overview
-2. Use harvest_project_report for project allocation
-3. Check specific team members with harvest_get_team_member
-```
+Agents combine MCP tools with knowledge base context to generate comprehensive responses.
 
 ## Architecture
 
@@ -149,21 +156,30 @@ personal-agent/
 ├── mcp_server.py          # MCP server entry point
 ├── auth_server.py         # OAuth authentication server
 ├── tokens.db              # Encrypted OAuth tokens
+├── .mcp.json              # MCP server config for Claude Code
+├── .claude/
+│   └── agents/            # Custom Claude Code agents
+│       ├── weekly-summary.md
+│       ├── daily-briefing.md
+│       ├── meeting-prep.md
+│       ├── meeting-notes.md
+│       ├── person-context.md
+│       ├── project-status.md
+│       ├── triage.md
+│       └── time-review.md
 ├── knowledge/             # Markdown knowledge base
-├── src/
-│   ├── config.py          # Settings from .env
-│   ├── mcp/
-│   │   ├── server.py      # MCP server implementation
-│   │   └── tools.py       # Tool handlers
-│   ├── microsoft/
-│   │   ├── auth.py        # OAuth + token storage
-│   │   ├── graph_client.py    # Graph API client
-│   │   └── copilot_client.py  # Meeting transcripts + AI
-│   ├── harvest/
-│   │   └── client.py      # Harvest API client
-│   └── agent/
-│       └── tools.py       # Tool definitions (legacy)
-└── requirements.txt
+└── src/
+    ├── config.py          # Settings from .env
+    ├── mcp/
+    │   ├── server.py      # MCP server implementation
+    │   └── tools.py       # Tool handlers
+    ├── microsoft/
+    │   ├── auth.py        # OAuth + token storage
+    │   ├── graph_client.py    # Graph API client
+    │   └── copilot_client.py  # Meeting transcripts + AI
+    └── harvest/
+        └── client.py      # Harvest API client
+```
 ```
 
 ## Troubleshooting
